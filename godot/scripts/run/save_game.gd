@@ -10,7 +10,8 @@ extends RefCounted
 ## {version, kind: "ftl-proto-run", setup (hangar run_config), run: RunState variables (SaveCodec; every variable
 ## of RunState except RUN_SKIP, so new plain-data fields — quests, ... — are saved without touching this file),
 ## engine (EventEngine streams and pools), ship (ShipSave), enemy_ship (ShipSave of the event ship, mid-combat),
-## crew_rng (CrewIdentity stream), inventory (ShipInventory)}. Written to `<path>.new` and renamed, like
+## crew_rng (CrewIdentity stream), inventory (ShipInventory), battle (BattleSave: projectiles in flight, drones in
+## space, weapon targets / volleys, hacking, mind control, teleports, enemy AI)}. Written to `<path>.new` and renamed, like
 ## ScoreKeeper::Save's ae_prof.new.sav.
 
 const VERSION := 1
@@ -44,7 +45,7 @@ static func delete() -> void:
 
 
 ## The whole save as a Variant (no file).
-static func build(run: RunState, enemy_ship: ShipState = null, setup := {}) -> Dictionary:
+static func build(run: RunState, enemy_ship: ShipState = null, setup := {}, combat: Combat = null) -> Dictionary:
 	var d := {"version": VERSION, "kind": KIND, "setup": SaveCodec.encode(setup)}
 	d.run = SaveCodec.props_of(run, RUN_SKIP)
 	var eng := {"rng": SaveCodec.rng_state(run.engine.rng)}
@@ -64,17 +65,21 @@ static func build(run: RunState, enemy_ship: ShipState = null, setup := {}) -> D
 	if enemy_ship != null and not run.enemy.is_empty() and not run.enemy.get("done", false) \
 			and not enemy_ship.is_destroyed():
 		d.enemy_ship = ShipSave.snapshot(enemy_ship)
+	# The battle (SaveSpace, ExportBattleState, CompleteShip::SaveState, ShipAI::Save): with the enemy when its
+	# ship is saved, else only the player's side.
+	if combat != null:
+		d.battle = BattleSave.snapshot(combat, run.ship, enemy_ship if d.has("enemy_ship") else null)
 	return d
 
 
 ## WorldManager::SaveGame. Returns true when written. Not after the run ended (game over / victory).
-static func save_run(run: RunState, enemy_ship: ShipState = null, setup := {}) -> bool:
+static func save_run(run: RunState, enemy_ship: ShipState = null, setup := {}, combat: Combat = null) -> bool:
 	last_error = ""
 	if run == null or run.over != "":
 		return false
 	if not persist:
 		return false
-	var data := build(run, enemy_ship, setup)
+	var data := build(run, enemy_ship, setup, combat)
 	var tmp := path + ".new"
 	var f := FileAccess.open(tmp, FileAccess.WRITE)
 	if f == null:
@@ -132,6 +137,8 @@ static func restore(d: Dictionary) -> RunState:
 		r.mgmt.inv = inv
 	if d.has("enemy_ship") and not r.enemy.is_empty():
 		r.enemy["saved_ship"] = d.enemy_ship
+	if d.has("battle"):
+		r.set_meta(&"saved_battle", d.battle)  # applied once the scene built the combat (take_battle)
 	# Gameplay settings frozen when the run started stay frozen (rules/hooks.md "Settings").
 	if not r.frozen_settings.is_empty():
 		Settings.freeze_from(r.frozen_settings)
@@ -155,3 +162,12 @@ static func take_enemy_ship(run: RunState) -> ShipState:
 		ShipSave.apply(es, run.enemy.saved_ship)
 		run.enemy.erase("saved_ship")
 	return es
+
+
+## The saved battle for the scene (BattleSave.apply), once after a load; {} otherwise.
+static func take_battle(run: RunState) -> Dictionary:
+	if run == null or not run.has_meta(&"saved_battle"):
+		return {}
+	var b: Dictionary = run.get_meta(&"saved_battle")
+	run.remove_meta(&"saved_battle")
+	return b

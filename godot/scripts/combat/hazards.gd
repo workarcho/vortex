@@ -1,9 +1,13 @@
 class_name HazardRule
 extends RefCounted
 ## Beacon environmental hazards (rules/hazards.md): sun flares, asteroids, pulsar ion pulses, ion storm, nebula
-## (and the ASB/PDS volley, simplified). One instance per beacon (kept by the run across scene rebuilds); `tick`
-## runs every unpaused frame with the ships in the space; asteroids are real projectiles added to the Combat.
+## and the ASB/PDS volley. One instance per beacon (kept by the run across scene rebuilds); `tick` runs every
+## unpaused frame with the ships in the space; asteroids are real projectiles added to the Combat.
 ## Timers are real (game) seconds. Not tied to combat: they run with or without an enemy.
+## Stacking (rules/hazards.md §0b): like SpaceManager, every environment is its own flag; each event's
+## <environment> is ADDED by WorldManager::ModifyEnvironment (`add_environment`), nothing clears them until the
+## beacon is left. Sun, pulsar and ASB share one flash timer (the last one set gives its period); an active ASB
+## suspends the sun / pulsar block; asteroids and nebula / storm run alongside anything.
 
 enum Env { NONE = -1, ASTEROIDS = 1, SUN = 2, NEBULA = 3, STORM = 4, PULSAR = 5, PDS = 6 }
 
@@ -26,8 +30,11 @@ const PDS_FLEET_GUN := Rect2i(550, 447, 568, 157)
 const PDS_DECOY_X := -400.0
 const PDS_QUEUE_GAP := 0.5
 
-var env := Env.NONE
+var env := Env.NONE  # the first environment of the beacon (map / achievements use it)
+var envs := {}  # every environment set at this beacon (Env -> true): SpaceManager's independent flags
 var target := 2  # PDS only: 0 player, 1 enemy, 2 all
+var period: Array = [28.0, 34.0]  # flashTimer min / max (s): of the last sun / pulsar / PDS set
+var screen_shake_queued := false  # SpaceManager::queueScreenShake (an ASB shot left the gun; ScreenShake reads it)
 var rng := RandomNumberGenerator.new()
 var timer := 0.0  # flash timer (sun / pulsar / PDS volley)
 var goal := 30.0
@@ -60,19 +67,59 @@ var messages: Array = []
 ## WorldManager::ModifyEnvironment on arrival. `player_shield_level`: shield system level (asteroid table).
 static func create(env_id: int, env_target: int, seed: int, player_shield_level: int) -> HazardRule:
 	var h := HazardRule.new()
-	h.env = env_id
 	h.target = env_target
 	h.rng.seed = seed
-	if PERIODS.has(env_id):
-		h._new_goal()
-		if env_id == Env.PDS:
-			h.pds_timer = 2.0 + float(h.rng.randi() % 200) / 100.0
-	if env_id == Env.ASTEROIDS:
-		h.ast_level = clampi(player_shield_level / 2, 0, 4)
-		h.ast_state = 2 - int(h.rng.randi() & 1)
-		h.ast_state_timer = h._draw(AST_STATES[h.ast_level][h.ast_state])
-		h.ast_spawn_timer = -1.0
+	h.add_environment(env_id, env_target, player_shield_level)
 	return h
+
+
+## WorldManager::ModifyEnvironment(envFlag, envTarget): sets one more environment flag at this beacon (the arrival
+## event's, then any later event / choice outcome with an <environment>). Asteroids = StartAsteroids (generator
+## re-initialised from the player's shield level); sun / pulsar = SetFireLevel / SetPulsarLevel (flash timer period
+## [28, 34) / [11, 18) s, restarted); PDS = SetPlanetaryDefense (re-target + restart, `set_planetary_defense`);
+## nebula = SetNebula; storm = SetStorm (+ nebula). Nothing is cleared.
+func add_environment(env_id: int, env_target: int, player_shield_level: int) -> void:
+	if env_id < 1 or env_id > Env.PDS:
+		return
+	if env == Env.NONE:
+		env = env_id as Env
+	envs[env_id] = true
+	match env_id:
+		Env.ASTEROIDS:
+			ast_level = clampi(player_shield_level / 2, 0, 4)
+			ast_state = 2 - int(rng.randi() & 1)
+			ast_state_timer = _draw(AST_STATES[ast_level][ast_state])
+			ast_spawn_timer = -1.0
+		Env.SUN, Env.PULSAR:
+			period = PERIODS[env_id]
+			_new_goal()
+		Env.PDS:
+			set_planetary_defense(env_target)
+		Env.STORM:
+			envs[Env.NEBULA] = true  # SetStorm -> SetNebula(true)
+
+
+## True when `e` was set at this beacon (for PDS: and the battery is still up, bPDS).
+func has_env(e: int) -> bool:
+	if e == Env.PDS:
+		return envs.has(Env.PDS) and pds_on
+	return envs.has(e)
+
+
+## The environment the backdrop shows (SpaceManager::OnRenderBackground / OnRenderForeground): nebula clouds (storm
+## lightning) hide planet, sun and pulsar; else the sun, else the pulsar, else the (ASB) planet.
+func visual_env() -> int:
+	for e in [Env.STORM, Env.NEBULA, Env.SUN, Env.PULSAR, Env.PDS, Env.ASTEROIDS]:
+		if envs.has(e):
+			return e
+	return Env.NONE
+
+
+## SpaceManager::GetScreenShake: returns queueScreenShake and clears it.
+func take_screen_shake() -> bool:
+	var q := screen_shake_queued
+	screen_shake_queued = false
+	return q
 
 
 func _draw(r: Array) -> float:
@@ -80,7 +127,7 @@ func _draw(r: Array) -> float:
 
 
 func _new_goal() -> void:
-	var p: Array = PERIODS[env]
+	var p: Array = period
 	var lo := int(p[0] * 1000)
 	var hi := int(p[1] * 1000)
 	goal = float(lo + int(rng.randi() % (hi - lo))) / 1000.0
@@ -88,33 +135,34 @@ func _new_goal() -> void:
 	sound_done = false
 
 
+## SpaceManager::DangerousEnvironment: an ASB aimed only at the enemy makes the beacon safe whatever else is there;
+## otherwise sun, running asteroids, ASB or pulsar.
 func is_dangerous() -> bool:
-	return env in [Env.SUN, Env.PULSAR, Env.ASTEROIDS] or (env == Env.PDS and pds_on and target != 1)
+	if has_env(Env.PDS) and target == 1:
+		return false
+	return has_env(Env.SUN) or has_env(Env.ASTEROIDS) or has_env(Env.PDS) or has_env(Env.PULSAR)
 
 
 ## Seconds before the next flare / pulse / volley (INF without one).
 func remaining() -> float:
-	return goal - timer if PERIODS.has(env) else INF
+	return goal - timer if has_env(Env.SUN) or has_env(Env.PULSAR) or has_env(Env.PDS) else INF
 
 
 ## SpaceStatus::OnLoop: [currentEffect, currentEffect2] for the HUD icons. Asteroids 1, sun 2, pulsar 5, PDS 6
-## (9 = aimed only at the enemy: green "ALLIES!"), nebula 3 (+ 4 with the ion storm), none 0.
+## (9 = aimed only at the enemy: green "ALLIES!"), nebula 3 (+ 4 with the ion storm), none 0. ONE icon when several
+## environments stack, by priority: asteroids > ASB > sun > pulsar > nebula (the storm's second icon only with the
+## nebula one).
 func hud_effects() -> Array:
-	match env:
-		Env.ASTEROIDS:
-			return [1, 0]
-		Env.SUN:
-			return [2, 0]
-		Env.PULSAR:
-			return [5, 0]
-		Env.PDS:
-			if not pds_on:
-				return [0, 0]
-			return [9 if target == 1 else 6, 0]
-		Env.NEBULA:
-			return [3, 0]
-		Env.STORM:
-			return [3, 4]
+	if has_env(Env.ASTEROIDS):
+		return [1, 0]
+	if has_env(Env.PDS):
+		return [9 if target == 1 else 6, 0]
+	if has_env(Env.SUN):
+		return [2, 0]
+	if has_env(Env.PULSAR):
+		return [5, 0]
+	if has_env(Env.NEBULA):
+		return [3, 4 if has_env(Env.STORM) else 0]
 	return [0, 0]
 
 
@@ -140,20 +188,28 @@ func hud_tooltip(effect: int, danger_zone := false) -> String:
 
 
 ## Warning text id while < 5 s are left (warning_solar_flare / warning_ion_pulse / warning_pds_locked), else "".
+## SpaceStatus::OnLoop: running asteroids leave the message alone (never started here); sun / pulsar text first
+## (also while an ASB drives the shared timer), else the ASB lock.
 func warning() -> String:
-	if remaining() >= WARN_LEAD or (env == Env.PDS and not pds_on):
+	if has_env(Env.ASTEROIDS) or remaining() >= WARN_LEAD:
 		return ""
-	return {Env.SUN: "warning_solar_flare", Env.PULSAR: "warning_ion_pulse", Env.PDS: "warning_pds_locked"}.get(env, "")
+	if has_env(Env.SUN):
+		return "warning_solar_flare"
+	if has_env(Env.PULSAR):
+		return "warning_ion_pulse"
+	if has_env(Env.PDS):
+		return "warning_pds_locked"
+	return ""
 
 
 ## Status effects at arrival (CheckStatusEffects): nebula = sensors limited to 0, ion storm = also the reactor
 ## divided by 2. Applied to every ship given (both sides).
 func apply_status(ship: ShipState) -> void:
-	if env == Env.NEBULA or env == Env.STORM:
+	if has_env(Env.NEBULA):
 		var s := ship.sys("sensors")
 		if s:
 			ship.set_power_loss("sensors", s.get_level())
-	if env == Env.STORM:
+	if has_env(Env.STORM):
 		ship.reactor_divide = 2
 		ship._check_reactor()
 
@@ -164,29 +220,29 @@ func tick(seconds: float, ships: Array, combat: Combat = null) -> void:
 		flash += seconds
 		if flash > FLASH_LEN:
 			flash = -1.0
-	match env:
-		Env.SUN, Env.PULSAR:
-			timer += seconds
-			var rem := goal - timer
-			if rem < SOUND_LEAD and not sound_done:
-				sound_done = true
-				FtlData.play("solarFlare" if env == Env.SUN else "pulsar")
-			if rem < FLASH_LEAD and flash < 0.0:
-				flash = 0.0
-			if timer >= goal:
-				flares += 1
-				for s in ships:
-					if s != null and not s.jumping and not s.is_destroyed():
-						if env == Env.SUN:
-							sun_damage(s)
-						else:
-							pulsar_damage(s)
-				_new_goal()
-				_show_messages(combat)
-		Env.PDS:
-			_tick_pds(seconds, ships, combat)
-		Env.ASTEROIDS:
-			_tick_asteroids(seconds, ships, combat)
+	# SpaceManager::OnLoop: an ASB (bPDS) runs UpdatePDS INSTEAD of the sun / pulsar block.
+	if has_env(Env.PDS):
+		_tick_pds(seconds, ships, combat)
+	elif has_env(Env.SUN) or has_env(Env.PULSAR):
+		timer += seconds
+		var rem := goal - timer
+		if rem < SOUND_LEAD and not sound_done:
+			sound_done = true
+			FtlData.play("solarFlare" if has_env(Env.SUN) else "pulsar")  # the sun's sound wins
+		if rem < FLASH_LEAD and flash < 0.0:
+			flash = 0.0
+		if timer >= goal:
+			flares += 1
+			for s in ships:
+				if s != null and not s.jumping and not s.is_destroyed():
+					if has_env(Env.PULSAR):
+						pulsar_damage(s)  # the pulsar's damage wins
+					else:
+						sun_damage(s)
+			_new_goal()
+			_show_messages(combat)
+	if has_env(Env.ASTEROIDS):
+		_tick_asteroids(seconds, ships, combat)
 
 
 ## ShipManager::SunDamage: 3–6 fires (no shield layer, no super shield) else 1–2, in random rooms; each room with
@@ -315,9 +371,12 @@ func _spawn_asteroid(ship: ShipState, player: bool, combat: Combat) -> void:
 ## SetPlanetaryDefense(true, target) again (a choice outcome with `<environment type="PDS" target=...>`, e.g.
 ## REBEL_PDS hacked: all / enemy): new target, volley timer restarted, firing step re-rolled; the gun stays.
 func set_planetary_defense(new_target: int) -> void:
-	env = Env.PDS
+	if env == Env.NONE:
+		env = Env.PDS
+	envs[Env.PDS] = true
 	target = new_target
 	pds_on = true
+	period = PERIODS[Env.PDS]
 	_new_goal()
 	pds_timer = 2.0 + float(rng.randi() % 200) / 100.0
 
@@ -384,6 +443,7 @@ func _tick_pds(seconds: float, ships: Array, combat: Combat = null) -> void:
 			return
 	var shot: Dictionary = pds_queue.pop_back()
 	_launch_pds(shot, ships, combat)
+	screen_shake_queued = true  # UpdatePDS: queueScreenShake = true with every launched shot
 	pds_shots += 1
 	pds_timer = PDS_QUEUE_GAP if not pds_queue.is_empty() else 2.0 + float(rng.randi() % 300) / 100.0
 

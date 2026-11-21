@@ -68,7 +68,7 @@ func active() -> bool:
 	if run == null:
 		return false
 	if run.arrival_serial == _serial or _serial < 0:
-		_built_active = run.hazard != null and run.hazard.env == HazardRule.Env.ASTEROIDS
+		_built_active = run.hazard != null and run.hazard.has_env(HazardRule.Env.ASTEROIDS)
 	return _built_active
 
 

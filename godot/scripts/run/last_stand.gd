@@ -7,8 +7,8 @@ extends RefCounted
 ## dictionary `RunState.boss` (saved with the run):
 ##   active (bossLevel), path (beacon ids, flagship start -> base), loc (bossLoc), jumping (bossJumping),
 ##   reversed (reversedPath), arrived (arrivedAtBase 0..4), base, stage (currentStage), next_stage, crew_counts,
-##   death_began (bDeathBegan), won (CommandGui alreadyWon), victory_pending, power_time / power_goal / power_count,
-##   stalemate / escaping / escape_timer / last_hull.
+##   death_began (bDeathBegan), won (CommandGui alreadyWon), wait_t (WAIT animation, -1 = none),
+##   power_time / power_goal / power_count, stalemate / escaping / escape_timer / last_hull.
 ## Beacons of the boss level carry `boss` (the flagship is there) and `fleet_changing` (overtaken next turn).
 
 const FINAL_DESC := "FINAL"
@@ -27,6 +27,11 @@ const TRIES := 16  # shared base + flagship attempts before the whole map is reg
 const TURNS_TO_LOSE := 4  # arrivedAtBase == 4 -> CheckGameOver
 ## BossShip::GetEvent: StatusEffect {type 2 = limit, system 7 = sensors, amount 2, target 0 = player}.
 const SENSOR_LIMIT := {"type": "limit", "target": "player", "system": "sensors", "amount": 2}
+const WAIT_TIME := 2.0  # StarMap ctor: the `waiting` AnimationTracker lasts 2.0 s
+const WAIT_SLIDE := 0.6  # UpdateDangerZone (waiting, bossJumping): bossPosition = loc + progress x 0.6 x hop
+## Intents refused while the wait animation runs (StarMap::OnLoop: wait / close buttons inactive; MouseMove /
+## OnTouch return early, so no beacon can be hovered or picked).
+const WAIT_BLOCKED := [RunIntent.CLOSE_MAP, RunIntent.SELECT_BEACON, RunIntent.CONFIRM_JUMP, RunIntent.WAIT]
 
 
 static func active(run: RunState) -> bool:
@@ -116,7 +121,7 @@ static func generate(sector_seed: int, desc: XmlNode, engine: EventEngine) -> Ar
 		m.beacons[m.start].event = engine.base_event(START_EVENT)
 		state = {"active": true, "path": path, "loc": 0, "jumping": false, "reversed": false, "arrived": 0,
 			"base": base, "stage": 0, "next_stage": 1, "crew_counts": [], "death_began": true, "won": false,
-			"victory_pending": false, "power_time": 0.0, "power_goal": 30.0, "power_count": 0}
+			"wait_t": -1.0, "power_time": 0.0, "power_goal": 30.0, "power_count": 0}
 		break
 	var s: Dictionary = m.beacons[m.start]
 	s.visited += 1
@@ -284,15 +289,48 @@ static func base_destroyed(run: RunState) -> bool:
 
 ## The map's WAIT button in the boss level (StarMap::OnLoop): also with fuel, as long as no ship is at the beacon.
 static func can_wait(run: RunState) -> bool:
-	return active(run) and run.phase == RunState.Phase.IDLE and (run.enemy.is_empty() or bool(run.enemy.done))
+	return active(run) and run.phase == RunState.Phase.IDLE and (run.enemy.is_empty() or bool(run.enemy.done)) \
+		and not waiting(run)
 
 
-## Wait in the boss level (UpdateDangerZone's waiting branch): UpdateBoss, boss_wait, the current beacon's event
-## cleared unless overtaken (out of fuel: SetupNoFuel as usual), then GetWaitLocation "arrives" at the same beacon.
-## Returns false outside the boss level (RunState.wait does the normal thing).
+## The WAIT animation is running (StarMap `waiting` tracker; `RunState.boss.wait_t` = seconds elapsed, -1 = none).
+static func waiting(run: RunState) -> bool:
+	return active(run) and float(run.boss.get("wait_t", -1.0)) >= 0.0
+
+
+## AnimationTracker::Progress of the wait animation (0..1).
+static func wait_progress(run: RunState) -> float:
+	return clampf(float(run.boss.get("wait_t", 0.0)) / WAIT_TIME, 0.0, 1.0) if waiting(run) else 0.0
+
+
+## WAIT in the boss level (StarMap wait button): starts the 2 s `waiting` animation; the map stays open (close and
+## wait inactive, beacons ignored) and `step_wait` finishes the turn. Returns false outside the boss level
+## (RunState.wait does the normal thing).
 static func wait(run: RunState) -> bool:
 	if not active(run):
 		return false
+	if not waiting(run):
+		run.boss.wait_t = 0.0
+		run.selected = -1
+		run._log("wait (last stand): %.1f s animation" % WAIT_TIME)
+	return true
+
+
+## StarMap::OnLoop -> UpdateDangerZone while `waiting` runs (real time, the map is open): AnimationTracker::Update;
+## once done the flagship's turn is taken (`_finish_wait`). StarMapView calls this every frame.
+static func step_wait(run: RunState, seconds: float) -> void:
+	if not waiting(run):
+		return
+	run.boss.wait_t = float(run.boss.wait_t) + seconds
+	if float(run.boss.wait_t) >= WAIT_TIME:
+		run.boss.wait_t = -1.0
+		_finish_wait(run)
+
+
+## The end of the wait (UpdateDangerZone's waiting branch, `waiting.done`): UpdateBoss, boss_wait, the map closes,
+## the current beacon's event cleared unless overtaken (out of fuel: SetupNoFuel as usual), then GetWaitLocation
+## "arrives" at the same beacon (a flagship that moved in starts the fight).
+static func _finish_wait(run: RunState) -> void:
 	run.map_open = false
 	run.selected = -1
 	update_boss(run)
@@ -311,7 +349,6 @@ static func wait(run: RunState) -> bool:
 	run._log("wait (last stand): flagship at %d" % boss_beacon(run))
 	run._clear_location(true)
 	run._arrive(false)
-	return true
 
 
 # ------------------------------------------------------------------ the fight (WorldManager / BossShip)
@@ -422,11 +459,17 @@ static func check_combat(run: RunState, es: ShipState, seconds: float) -> String
 	E.outcome = name
 	var kind := "boss_stalemate" if bool(E.escaped) else ("boss_destroyed" if name == EV_DESTROYED else "boss_escaped")
 	Hooks.emit(&"combat_outcome", run, kind)
-	_show(run, name)
-	if name == EV_DESTROYED:  # BossShip::Defeated -> StarMap::ClearBoss + CommandGui::Victory
+	if name == EV_DESTROYED:
+		# WorldManager::OnLoop, one frame: BossShip::Defeated -> StarMap::ClearBoss + CommandGui::Victory (GameOver::
+		# SetVictory starts the credits, OpenText(gameover_win) opens the window), then UpdateLocation(BOSS_DESTROYED).
+		# The game-over window is the first of CommandGui's focusWindows and RenderStatic draws only the first open
+		# one, so the BOSS_DESTROYED box (its status clear applied) is never seen: closed here.
 		clear_boss(run)
-		B.victory_pending = true
+		_victory(run)
+		_show(run, name)
+		run._close_dialog()
 	else:
+		_show(run, name)
 		force_jump(run)
 	return kind
 
@@ -465,15 +508,30 @@ static func _victory_begins(run: RunState) -> void:
 		FtlData.play("victory")
 
 
-## Per unpaused frame (RunState.tick): CommandGui::CheckGameover's StarMap::CheckGameOver (gameover_fedbase) and,
-## once the BOSS_DESTROYED box is closed, CommandGui::Victory -> the victory window (gameover_win).
+## CommandGui::Victory: GameOver::SetVictory(true, ship name, crew names) (credits first: RunEndBox / CreditScreen)
+## + OpenText(gameover_win) -> the run ends in victory.
+static func _victory(run: RunState) -> void:
+	run.over_cause = "gameover_win"
+	run.end_run("victory", FtlData.tr_id("gameover_win").replace("\\n", "\n"))
+
+
+## CommandGui::Victory's credit data: the player ship's name (myBlueprint.name) and CrewMemberFactory::GetCrewNames
+## (crew of the player's side that count for victory, factory order; [inferred] = alive, not drones, both ships).
+static func victory_crew_names(run: RunState) -> Array:
+	var out := []
+	var ships := [run.ship]
+	if run.ship.opponent != null:
+		ships.append(run.ship.opponent)
+	for s in ships:
+		for c in s.crew:
+			if c.player_owned and c.is_alive() and not c.is_drone():
+				out.append(c.display_name())
+	return out
+
+
+## Per unpaused frame (RunState.tick): CommandGui::CheckGameover's StarMap::CheckGameOver (gameover_fedbase).
 static func tick(run: RunState) -> void:
 	if run.over != "":
-		return
-	if bool(run.boss.get("victory_pending", false)) and run.phase == RunState.Phase.IDLE:
-		run.boss.victory_pending = false
-		run.over_cause = "gameover_win"
-		run.end_run("victory", FtlData.tr_id("gameover_win").replace("\\n", "\n"))
 		return
 	if base_destroyed(run) and not bool(run.boss.get("won", false)):
 		run.game_over("gameover_fedbase")
@@ -488,7 +546,8 @@ static func already_won(run: RunState) -> bool:
 
 ## --last-stand: jump straight into sector 8. --boss-stage=N: sector 8, then straight to the flagship's beacon with
 ## stage N next (stages 2 / 3 start with the stage-1 crew). --boss-turns=N: N flagship turns (map screenshots).
-## --boss-surge: the power timer 0.5 s before its surge.
+## --boss-surge: the power timer 0.5 s before its surge. --boss-victory: the flagship defeated at once (credits).
+## --credits-scroll=PX: the credits start scrolled to PX. --boss-wait: the map open with the WAIT animation running.
 static func cli(run: RunState, a: String) -> void:
 	if run == null:
 		return
@@ -503,6 +562,17 @@ static func cli(run: RunState, a: String) -> void:
 			update_boss(run)
 	elif a == "--boss-surge" and active(run):
 		run.boss.power_time = float(run.boss.get("power_goal", 30.0)) - 0.5
+	elif a == "--boss-victory" and active(run):  # screenshots: the flagship defeated now -> credits, then the window
+		_close_dialogs(run)
+		run.boss.won = true
+		clear_boss(run)
+		_victory(run)
+	elif a.begins_with("--credits-scroll="):  # screenshots: RunEndBox starts the credits at this scroll (px)
+		run.set_meta(&"debug_credits_scroll", float(a.get_slice("=", 1)))
+	elif a == "--boss-wait" and active(run):  # screenshots: the WAIT animation started (map open)
+		_close_dialogs(run)
+		run.map_open = true
+		wait(run)
 
 
 static func _close_dialogs(run: RunState) -> void:

@@ -8,7 +8,8 @@ extends Node2D
 ## CLI (menu): --menu (force the menu), --hangar (open the hangar), --hangar-ship=N|BLUEPRINT (shipId 0..9 or a
 ## blueprint name of the hangar list), --hangar-type=0|1|2, --hangar-difficulty=easy|normal|hard, --hangar-ae=0|1,
 ## --hangar-start (press START), --hangar-list[=TYPE] (open the ship list), --menu-options (FTL options window),
-## --menu-stats[=L,R] (stats screen pages), --input=pc|touch, --screenshot=<png> [--wait=s], --mute, --debug,
+## --menu-stats[=L,R] (stats screen pages), --demo-profile (in-memory PlayerProfile.demo(), nothing saved),
+## --input=pc|touch, --screenshot=<png> [--wait=s], --mute, --debug,
 ## --data-setup (open the first-run "Select ftl.dat" screen even with data; also shown whenever FtlData has none).
 
 const MAIN_SCENE := "res://main.tscn"
@@ -29,6 +30,7 @@ var profile: InputProfile
 var hud_root: Control
 var menu_view: MainMenuView
 var profile_view: ProfileView
+var credits: CreditScreen  # main menu CREDITS (same screen as the victory credits)
 var hangar_view: HangarView
 var options: OptionsScreen  # our QoL / mod options (MOD OPTIONS button of the vanilla window)
 var vanilla_options: VanillaOptionsView  # FTL's options window (Options button)
@@ -84,7 +86,8 @@ func _ready() -> void:
 	Main.input_mode = mode
 	touch = mode == InputProfile.TOUCH
 	Music.open_main_menu()  # MainMenu::Open: title music (rules/music.md §4); the hangar keeps it
-	if FrameHost.top_scene(get_tree()) == self:  # the real game (not a test scene): load / apply the vanilla options
+	# The real game (not a test scene, not `--demo-profile` screenshots): load / apply the vanilla options.
+	if FrameHost.top_scene(get_tree()) == self and not args.has("--demo-profile"):
 		GameOptions.persist = true
 		GameOptions.apply()
 		SaveGame.persist = true  # continue.sav / profile.sav are written (rules/save_and_profile.md)
@@ -126,6 +129,9 @@ func _build() -> void:
 	hud_root.add_child(stats_view)
 	stats_view.setup(title)
 	_build_confirm()
+	credits = CreditScreen.new()
+	credits.visible = false
+	hud_root.add_child(credits)
 	vanilla_options = VanillaOptionsView.new()
 	vanilla_options.visible = false
 	hud_root.add_child(vanilla_options)
@@ -245,6 +251,10 @@ func _unhandled_key_input(e: InputEvent) -> void:
 func _process(delta: float) -> void:
 	if title == null:
 		return
+	if credits != null and credits.showing:
+		credits.step(delta)
+		if credits.done():
+			credits.skip()
 	if title.pending != "":
 		var p := title.pending
 		title.pending = ""
@@ -268,6 +278,8 @@ func _consume(p: String) -> void:
 		vanilla_options.show_screen()
 	elif p == "stats":
 		stats_view.open()
+	elif p == "credits":
+		credits.start("", [])
 	elif p == "continue":
 		continue_run()
 	elif p == "confirm_new_game":

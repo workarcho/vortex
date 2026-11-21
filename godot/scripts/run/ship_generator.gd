@@ -149,7 +149,7 @@ static func _pick_weapons(plan: Dictionary, body: String, tmpl: XmlNode, rng: Ra
 		var cnt := int(ov.attr("count", str(pool.size())))
 		for i in mini(cnt, pool.size()):
 			var nm: String = pool.pop_at(rng.randi() % pool.size())
-			var w := FtlData.weapon_blueprint(nm)
+			var w := FtlData.weapon_blueprint(nm) if FtlData.has_weapon_blueprint(nm) else {}
 			if w.is_empty():
 				continue
 			names.append(nm)
@@ -162,6 +162,8 @@ static func _pick_weapons(plan: Dictionary, body: String, tmpl: XmlNode, rng: Ra
 	var flags := 3
 	var bps := {}
 	for nm in list:
+		if not FtlData.has_weapon_blueprint(nm):
+			continue  # GetWeaponBlueprint's default blueprint (unknown name, power 0): never a candidate
 		var w := FtlData.weapon_blueprint(nm)
 		if not w.is_empty() and int(w.power) > 0:
 			bps[nm] = w

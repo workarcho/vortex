@@ -440,7 +440,70 @@ func _test_ship_list() -> void:
 	l.click(Vector2(20, 700))
 	check("click outside closes", l.visible, false)
 	check("mini ship texture", ShipListView.mini_texture(0, 0) != null, true)
+	# Touch: a ship acts on release; a release after a held tooltip picks nothing.
+	TooltipService.touch = true
+	l.open(0, 0)
+	picked[0] = -1
+	picked[1] = -1
+	var at: Vector2 = l.buttons["ship4"].rect.get_center()
+	var ev := InputEventMouseButton.new()
+	ev.button_index = MOUSE_BUTTON_LEFT
+	ev.position = at
+	ev.pressed = true
+	l._gui_input(ev)
+	check("touch: press does not pick", picked[0], -1)
+	l._held = true
+	var up: InputEventMouseButton = ev.duplicate()
+	up.pressed = false
+	l._gui_input(up)
+	check("touch: release after a held tooltip does not pick", [picked[0], l.visible], [-1, true])
+	l._gui_input(ev)
+	l._gui_input(up)
+	check("touch: tap picks on release", picked, [4, 0])
+	TooltipService.touch = false
 	l.queue_free()
+	_test_ship_buttons_and_arrows()
+
+
+## ShipButton geometry (OnInit: +20 px when ship-locked / non-existent, hit box +40 when unlocked) and the
+## UnlockArrows of ShipSelect::Open (positions, status from layout A unlocks, images, tooltip text).
+func _test_ship_buttons_and_arrows() -> void:
+	print("ship list: ShipButton geometry, UnlockArrows")
+	check("unlocked ship: slot, 191x161 hit box", ShipListView.button_rect(1, false, false),
+		Rect2(ShipListView.slot_pos(1), Vector2(191, 161)))
+	check("ship-locked: 20 px lower, 121 high", ShipListView.button_rect(6, true, false),
+		Rect2(ShipListView.slot_pos(6) + Vector2(0, 20), Vector2(191, 121)))
+	check("no type C: 20 px lower", ShipListView.button_rect(8, false, true).position.y,
+		ShipListView.slot_pos(8).y + 20)
+	check("no type C only for crystal / lanius", [ShipListView.no_exist(8, 2), ShipListView.no_exist(9, 2),
+		ShipListView.no_exist(0, 2), ShipListView.no_exist(8, 1)], [true, true, false, false])
+	# Profile of screenshot 39: every A but the Rock (6) and the Crystal (8).
+	var open_a := func(id: int) -> bool: return not id in [6, 8]
+	var arr := ShipListView.unlock_arrows(open_a)
+	check("seven arrows (display 0..6)", arr.size(), 7)
+	check("only the Slug -> Rock arrow shows", arr.filter(func(a): return a.status != 3).map(func(a): return a.i),
+		[5])
+	var a5: Dictionary = arr[5]
+	check("Slug arrow: left of the button (-43, +66), 43x28, victory", [a5.rect, a5.status, a5.dir],
+		[Rect2(ShipListView.slot_pos(5) + Vector2(-43, 66), Vector2(43, 28)), 1, 2])
+	check("Slug arrow image", ShipListView.arrow_image(a5), "customizeUI/arrow_v_left.png")
+	check("Slug arrow tooltip", ShipListView.arrow_text(a5), TooltipText.f("ship_unlock_victory",
+		TitleState.ship_class("PLAYER_SHIP_JELLY"), TitleState.ship_class("PLAYER_SHIP_ROCK")))
+	# Fresh profile: only the Kestrel.
+	arr = ShipListView.unlock_arrows(func(id: int) -> bool: return id == 0)
+	check("fresh: Kestrel arrow = sector 5, right of the button (+191, +66)", [arr[0].status, arr[0].dir,
+		arr[0].rect.position, ShipListView.arrow_image(arr[0])],
+		[2, 1, ShipListView.slot_pos(0) + Vector2(191, 66), "customizeUI/arrow_5_right.png"])
+	check("fresh: the others are lock arrows", arr.slice(1).map(func(a): return a.status), [0, 0, 0, 0, 0, 0])
+	check("fresh: Kestrel tooltip = sector 5", ShipListView.arrow_text(arr[0]), TooltipText.f(
+		"ship_unlock_sector5", TitleState.ship_class("PLAYER_SHIP_HARD"), TitleState.ship_class("PLAYER_SHIP_CIRCLE")))
+	check("Zoltan -> Mantis: down arrow (+87, +160 - 20 when locked), 30x85", [arr[3].dir, arr[3].rect],
+		[0, Rect2(ShipListView.slot_pos(3) + Vector2(87, 140), Vector2(30, 85))])
+	check("down lock arrow image", ShipListView.arrow_image(arr[3]), "customizeUI/arrow_lock_down.png")
+	check("lock arrow pointing right: left image (mirrored)", ShipListView.arrow_image(arr[1]),
+		"customizeUI/arrow_lock_left.png")
+	check("everything unlocked: no arrows", ShipListView.unlock_arrows(func(_id): return true).all(
+		func(a): return a.status == 3 and ShipListView.arrow_image(a) == ""), true)
 
 
 func _test_hangar_extras() -> void:

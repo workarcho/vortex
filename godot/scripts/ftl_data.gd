@@ -159,9 +159,10 @@ static func tag_attrs(block: String, tag: String) -> Dictionary:
 ## FTL's own data is never modified.
 const PROJECT_SHIPS := "res://data/test_ships.xml"
 ## dlcBlueprintsOverwrite.xml last: it only adds the type C player ships (PLAYER_SHIP_*_3) not defined earlier.
+## dlcPirateBlueprints.xml: the AE pirate variants (e.g. JELLY_BUTTON_P_DLC "Pirate Scout").
 ## bosses.xml: the flagship stages BOSS_<1-3>_<EASY|NORMAL|HARD>[_DLC] (BossShip::StartStage, rules/flagship.md).
 const SHIP_FILES := [PROJECT_SHIPS, "data/blueprints.xml", "data/autoBlueprints.xml", "data/dlcBlueprints.xml",
-	"data/dlcBlueprintsOverwrite.xml", "data/bosses.xml"]
+	"data/dlcBlueprintsOverwrite.xml", "data/bosses.xml", "data/dlcPirateBlueprints.xml"]
 
 
 ## Raw match of <shipBlueprint name="..."> (group 1 = attributes, 2 = body), or null.
@@ -558,6 +559,16 @@ func crew_names() -> Dictionary:
 	keys.sort()
 	_crew_names = {"names": names, "keys": keys, "short": shorts}
 	return _crew_names
+
+
+## True when a <weaponBlueprint name="..."> exists (no error). BlueprintManager::GetWeaponBlueprint (0x5e6580)
+## returns a static default blueprint for unknown names (e.g. BOMB_BREACH in WEAPONS_JELLY), which
+## ShipGenerator::GetPossibleWeaponList never picks (power 0).
+func has_weapon_blueprint(wname: String) -> bool:
+	for file in ["data/blueprints.xml", "data/dlcBlueprints.xml", "data/dlcBlueprintsOverwrite.xml"]:
+		if strip_comments(text(file)).contains("<weaponBlueprint name=\"" + wname + "\""):
+			return true
+	return false
 
 
 ## <weaponBlueprint name="..."> -> numeric weapon data.

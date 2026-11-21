@@ -153,7 +153,9 @@ static func f32(x: float) -> float:
 ## cooldownModifier = the manning skill bonus (artillery: 1.5 − 0.25 × power). cooldownMax = `max_cooldown` of the
 ## ship's weapons (WeaponControl::OnRender, every frame): the slowest weapon's bar is 33 × modifier tall and the
 ## others are in proportion (Kestrel: Burst II 12 s 33 px, Artemis 11 s 30 px); a chain laser's bar shrinks as its
-## boost lowers its charge time (unless it is the slowest). `max_h` = 33 (weapon box) or 22 (icon form).
+## boost lowers its charge time (unless it is the slowest). The reference is not static: when the chain weapon is
+## the slowest, its boosted cooldown.second is the max, so the other bars grow (rules/hud_layout.md).
+## `max_h` = 33 (weapon box) or 22 (icon form).
 static func cooldown_height(w: WeaponState, crew_level: int, max_h := COOLDOWN_H, cooldown_max := COOLDOWN_MAX) -> int:
 	var second := f32(w.max_charge(crew_level))
 	var m := f32(w.charge_modifier(crew_level))

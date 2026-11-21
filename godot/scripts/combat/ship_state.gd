@@ -13,6 +13,9 @@ var origin := Vector2.ZERO  # corner of the room grid (local coordinates of the 
 
 var hull := 0
 var max_hull := 0
+## ShipManager::iLastDamage: the last hull change from DamageHull / DamageArea / DamageBeam / SunDamage (negative =
+## repair), read and cleared once per frame by the player's screen shake (ScreenShake, CommandGui::OnLoop).
+var last_damage := 0
 var explosion: ShipExplosion = null  # set when the hull reaches 0 (rules/ship_destruction.md)
 var shield_layers := 0
 var shield_charger := 0.0
@@ -384,7 +387,7 @@ func _load_weapons() -> void:
 			var ws_sys := sys("weapons")
 			var list := FtlData.blueprint_list(load.get_string(1))
 			for n in list:
-				var w := FtlData.weapon_blueprint(n)
+				var w := FtlData.weapon_blueprint(n) if FtlData.has_weapon_blueprint(n) else {}
 				if not w.is_empty() and w.type == "LASER" and w.power <= ws_sys.level:
 					names.append(n)
 					break
@@ -393,7 +396,7 @@ func _load_weapons() -> void:
 			if names.is_empty():
 				var best := {}
 				for n in list:
-					var w := FtlData.weapon_blueprint(n)
+					var w := FtlData.weapon_blueprint(n) if FtlData.has_weapon_blueprint(n) else {}
 					if not w.is_empty() and w.power > 0 and (best.is_empty() or w.power < best.power):
 						best = w
 				if not best.is_empty():
@@ -428,7 +431,8 @@ func _startup_power() -> void:
 
 
 ## Artillery systems: a ProjectileFactory each, built from the blueprint's weapon (rules/artillery.md).
-## Mount = the first hardpoint after the weapon slots (FED cruiser: the 5th mount).
+## Mount (ShipManager::RenderWeapons): the weapons list padded to 4 entries, then the artillery weapons, so artillery
+## n uses mount max(weapons, 4) + n (FED cruiser: the 5th mount; flagship: mounts 4-7).
 func _load_artillery() -> void:
 	for b in blueprint.get("systems", []):
 		if b.id != "artillery" or not b.start or String(b.get("weapon", "")) == "":
@@ -436,7 +440,7 @@ func _load_artillery() -> void:
 		var w := FtlData.weapon_blueprint(b.weapon)
 		if w.is_empty():
 			continue
-		var ws := WeaponState.new(w, weapon_slots + artillery.size())
+		var ws := WeaponState.new(w, maxi(weapons.size(), 4) + artillery.size())
 		ws.powered = false
 		ws.is_artillery = true
 		artillery.append(ws)
@@ -1685,6 +1689,7 @@ func take_hull_damage(amount: int) -> void:
 	if Hooks.is_cancel(a):
 		return
 	hull = clampi(hull - int(a), 0, max_hull)
+	last_damage = int(a)  # iLastDamage = the damage dealt (DamageArea / DamageBeam: not clamped to the hull left)
 
 
 # ------------------------------------------------------------ hits (rules/damage.md)
@@ -1925,3 +1930,10 @@ func tile_center(room_id: int, tile: int) -> Vector2:
 	var r := room_rect(room_id)
 	var w := int(r.size.x / T)
 	return r.position + Vector2((tile % w) + 0.5, (tile / w) + 0.5) * T
+
+
+## ShipManager::GetLastDamage: returns iLastDamage and clears it.
+func take_last_damage() -> int:
+	var d := last_damage
+	last_damage = 0
+	return d

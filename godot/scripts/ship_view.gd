@@ -135,7 +135,7 @@ func setup(state: ShipState) -> void:
 	hits_layer.z_index = 6
 	hits_layer.draw.connect(_draw_shield_hits)
 	add_child(hits_layer)
-	for w in ship.weapons:
+	for w in ship.weapons + ship.artillery:
 		weapon_slide[w] = 1.0 if w.powered else 0.0
 	_build_lines()
 	_doors_anim.clear()
@@ -798,7 +798,7 @@ func _process(delta: float) -> void:
 		shield_flash = maxf(shield_flash - delta * 2.5, 0.0)
 	# Weapons slide out when powered and back in when not (0.5 s). Keyed by weapon: a swapped weapon keeps
 	# its slide state on its new mount.
-	for w in ship.weapons:
+	for w in ship.weapons + ship.artillery:
 		if ship.is_destroyed():
 			break  # the weapon art is frozen on its gib (the ship's loop no longer runs)
 		var target := 1.0 if w.powered else 0.0
@@ -953,14 +953,15 @@ func _draw_ship() -> void:
 	var mod := Color(1, 1, 1, alpha)
 	var hull_pos := ship.hull_position()
 	# Shield bubble: drawn by bubble_layer / mask_layer (z −1, under everything below).
-	# Weapon art under the hull (ShipManager::RenderWeapons before Ship::OnRenderBase)
+	# Weapon art under the hull (ShipManager::RenderWeapons before Ship::OnRenderBase): the weapons, then every
+	# artillery system's weapon (same WeaponAnimation: charge / charged / fire frames, glow) on its mount
+	# (rules/artillery.md "Art"); artillery charges without a manning bonus.
 	if not ship.is_destroyed():
 		var wl := ship.crew_level_in("weapons")
-		for i in ship.weapons.size():
-			var w := ship.weapons[i]
+		for w: WeaponState in ship.weapons + ship.artillery:
 			if w.mount_index < ship.mounts.size():
 				WeaponArt.draw(self, w, ship.mounts[w.mount_index], ship.mount_position(w.mount_index),
-					weapon_slide.get(w, 1.0), wl, mod)
+					weapon_slide.get(w, 1.0), 0 if w.is_artillery else wl, mod)
 	# Ship::OnRenderBase: hull, then the cloak image (while cloaked or fading out), then the player floor image.
 	if hull_tex:
 		draw_texture(hull_tex, hull_pos, Color(1, 1, 1, ship.cloak_alpha()))
@@ -1051,7 +1052,7 @@ func _draw_explosion() -> void:
 			var tex: Texture2D = g.tex
 			var c := tex.get_size() / 2 if tex else Vector2.ZERO
 			var xf := Transform2D(0.0, hull_pos + g.pos) * Transform2D(0.0, c) 				* Transform2D(deg_to_rad(g.rot), Vector2.ZERO) * Transform2D(0.0, -c)
-			for w in ship.weapons:
+			for w in ship.weapons + ship.artillery:
 				if w.mount_index >= ship.mounts.size():
 					continue
 				var m: Dictionary = ship.mounts[w.mount_index]
@@ -1532,16 +1533,22 @@ void fragment() {
 """
 
 
+## Rectangle of the bubble image (white layers and the green super shield alike), local ship coordinates
+## (Shields::RenderBase 0x0060c100, centre = Ship::GetBaseEllipse 0x00480be0): player (iShipId 0) = the image at its
+## own pixel size about the ellipse centre; enemy = the image scaled to 2a × 2b about the centre.
+static func bubble_rect(s: ShipState, tex_size: Vector2) -> Rect2:
+	if s.is_player:
+		return Rect2(s.shield_center - (tex_size / 2).floor(), tex_size)
+	return Rect2(s.shield_center - s.shield_axes, s.shield_axes * 2)
+
+
 ## Shields::RenderBase(alpha) with the given layer counts: the white bubble, alpha = layers / (3.5 player,
 ## 4 enemy) × 0.6 + 0.4 (nothing at 0 layers or max 0), scaled by the shieldsUp progress; then the super shield
 ## (§9) tinted COLOR_GREEN, alpha n / max(5, superMax), × 0.6 + 0.4 when the normal shield has no layer (unscaled).
 ## Player: `<img>_shields1.png` at its own pixel size centred on the ellipse (scale 1); enemy: enemy_shields.png
 ## stretched to 2a × 2b. Normal alpha blend, no additive pass.
 func _render_base(ci: CanvasItem, layers: int, max_layers: int, super_n: int, alpha: float, super_max := -1) -> void:
-	var rect := Rect2(ship.shield_center - ship.shield_axes, ship.shield_axes * 2)
-	if ship.is_player:
-		var ts := shield_tex.get_size()
-		rect = Rect2(ship.shield_center - (ts / 2).floor(), ts)
+	var rect := bubble_rect(ship, shield_tex.get_size())
 	var a := 0.0
 	if layers > 0 and max_layers > 0:
 		a = float(layers) / (3.5 if ship.is_player else 4.0) * 0.6 + 0.4

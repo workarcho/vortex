@@ -507,6 +507,16 @@ func test_charge_bar_height() -> void:
 	# Chain laser (16 s) next to a breach (22 s): its bar shrinks with its boost (-3 s each).
 	check("chain laser shrinks with its boost", [0, 1, 2, 3].map(func(b: int) -> int:
 		return h.call(["LASER_CHAINGUN", "MISSILES_BREACH"], 0, 0, b)), [24, 19, 15, 10])
+	# Chain laser as the slowest weapon, next to a Burst II (12 s): the reference is not static, GetMaxCooldown reads
+	# the chain's boosted cooldown.second (16, 13, 10, 7 s) every frame, so the Burst II grows to full height and
+	# from boost 2 on the Burst II is the reference and the chain's bar drops below it.
+	check("chain laser slowest: [chain, burst II] per boost", [0, 1, 2, 3].map(func(b: int) -> Array:
+		var ws: Array = [weapon("LASER_CHAINGUN"), weapon("LASER_BURST_3")]
+		ws[0].boost_level = b
+		var mx := WeaponBox.max_cooldown(ws, 0)
+		return [WeaponBox.cooldown_height(ws[0], 0, WeaponBox.COOLDOWN_H, mx),
+			WeaponBox.cooldown_height(ws[1], 0, WeaponBox.COOLDOWN_H, mx)]),
+		[[33, 24], [33, 30], [27, 33], [19, 33]])
 	var tiny := weapon("LASER_BURST_2")
 	tiny.bp = tiny.bp.duplicate()
 	tiny.bp.cooldown = 0.5

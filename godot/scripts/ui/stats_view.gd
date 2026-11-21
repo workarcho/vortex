@@ -201,12 +201,68 @@ func _draw_buttons() -> void:
 		MenuDraw.text_button(self, b, hover == nm)
 
 
+## ScoreKeeper::SetupTopShip: the first three ship achievements at (410, 118), 70 px apart.
+func ship_best_achievements() -> Array:
+	return MenuDraw.ship_achievements(ship_id).slice(0, 3)
+
+
+func ship_best_rects() -> Array:
+	var out := []
+	for i in ship_best_achievements().size():
+		out.append(Rect2(410 + 70 * i, 118, 64, 64))
+	return out
+
+
+## ScoreKeeper::Open lists (ACH_ROWS) as achievement entries {id, img, dim, unlocked} and their 64 px rects.
+func page_achievements() -> Array:
+	var out := []
+	for r in 3:
+		for i in ACH_ROWS[r].size():
+			var a := MenuDraw.achievement(ACH_ROWS[r][i])
+			if a.is_empty():
+				continue
+			out.append({"id": a.id, "img": a.img, "dim": 64, "unlocked": PlayerProfile.current().has_achievement(
+				String(a.id)), "at": ACH_AT + Vector2(70 * i, 170 * r)})
+	return out
+
+
+var ach_hover := -1  # ScoreKeeper::selectedAch (ACHIEVEMENTS page)
+var ship_ach_hover := -1  # ScoreKeeper::selectedShipAch (SHIP BEST page)
+
+
+func _process(_d: float) -> void:
+	if is_visible_in_tree() and not ship_list.visible:
+		hover_tooltips(TooltipService.local_pointer(self))
+
+
+## ScoreKeeper::MouseMove: on the ACHIEVEMENTS page every icon, on the SHIP BEST page the ship's three icons
+## (64×64 strict) get AchievementTracker::SetTooltip (instant); the hovered one is drawn with style 1. Touch: the
+## same tooltip while the finger is held (TooltipService). Returns the requested tooltip text ("" none).
+func hover_tooltips(m: Vector2) -> String:
+	var a := -1
+	var sa := -1
+	if not more:
+		if right == 1:
+			var achs := page_achievements()
+			a = MenuDraw.achievement_hover(self, achs, achs.map(func(x): return Rect2(x.at, Vector2(64, 64))), m)
+		if left == 1:
+			sa = MenuDraw.achievement_hover(self, ship_best_achievements(), ship_best_rects(), m,
+				TitleState.blueprint_of(ship_id, ship_type))
+	if a != ach_hover or sa != ship_ach_hover:
+		ach_hover = a
+		ship_ach_hover = sa
+		queue_redraw()
+	return TooltipService.text
+
+
 func _draw_ship_best() -> void:
 	var bp := TitleState.blueprint_of(ship_id, ship_type)
 	FtlData.draw_ftl_text(self, 24, TitleState.ship_class(bp), Vector2(217, 91), Color.WHITE, FtlFont.Align.CENTER)
-	var achs := MenuDraw.ship_achievements(ship_id)
-	for i in mini(3, achs.size()):
-		MenuDraw.draw_achievement(self, achs[i], Vector2(410 + 70 * i, 118))
+	# ScoreKeeper::OnRender: CAchievement::OnRender(pos, selectedShipAch == i ? 1 : 0, showNew = true).
+	var achs := ship_best_achievements()
+	var rects := ship_best_rects()
+	for i in achs.size():
+		MenuDraw.draw_achievement(self, achs[i], rects[i].position, false, 1 if ship_ach_hover == i else 0, true)
 	render_top_scores(PlayerProfile.current().ship_best(ship_id, ship_type), Vector2(112, 204), -1)
 
 
@@ -214,12 +270,10 @@ func _draw_achievements() -> void:
 	for r in 3:
 		FtlData.draw_ftl_text(self, 24, FtlData.tr_id(ACH_HEADINGS[r]), Vector2(ACH_AT.x, 99 + [0, 160, 330][r]),
 			Color.WHITE)
-		for i in ACH_ROWS[r].size():
-			var a := MenuDraw.achievement(ACH_ROWS[r][i])
-			if a.is_empty():
-				continue
-			MenuDraw.draw_achievement(self, {"img": a.img, "dim": 64}, ACH_AT + Vector2(70 * i, 170 * r),
-				PlayerProfile.current().has_achievement(String(a.id)))
+	# ScoreKeeper::OnRender: CAchievement::OnRender(pos, selectedAch == i ? 1 : 0, showNew = true).
+	var achs := page_achievements()
+	for i in achs.size():
+		MenuDraw.draw_achievement(self, achs[i], achs[i].at, false, 1 if ach_hover == i else 0, true)
 
 
 ## STATS page (main menu, ScoreKeeper::OnRender without lastPlaythrough): records (best run per stat), crew records

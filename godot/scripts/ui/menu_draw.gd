@@ -185,17 +185,18 @@ static func ship_achievements(ship_id: int) -> Array:
 	var out := []
 	for a in achievements():
 		if a.ship == bp:
-			out.append({"img": a.img, "dim": 64, "id": a.id, "unlocked": prof.has_achievement(String(a.id))})
+			out.append({"img": a.img, "dim": 64, "id": a.id, "unlocked": prof.has_achievement(String(a.id)),
+				"mini": "S_%d" % mini(out.size() + 1, 3)})
 	var won := prof.ship_victory(ship_id) >= 0  # PlayerProfile: victory marker / quest marker earned
 	var dots := []  # CAchievement shipDifficulties: a victory per layout (3 dots, 2 for the crystal / lanius)
 	for t in (2 if ship_id == PlayerProfile.CRYSTAL or ship_id == PlayerProfile.LANIUS else 3):
 		dots.append(prof.ship_victory(ship_id, t) >= 0)
 	out.append({"img": "achievements/S_V_%s.png" % ("on" if won else "off"), "dim": 32, "id": bp + "_VICTORY",
-		"unlocked": won, "dots": dots})
+		"unlocked": won, "dots": dots, "mini": "S_V"})
 	if ship_id in QUEST_SHIPS:
 		var q := prof.quests.has(ship_id)
 		out.append({"img": "achievements/S_Q_%s.png" % ("on" if q else "off"), "dim": 32, "id": bp + "_QUEST",
-			"unlocked": q})
+			"unlocked": q, "mini": "S_Q"})
 	return out
 
 
@@ -238,20 +239,34 @@ static func draw_achievement(ci: CanvasItem, a: Dictionary, p: Vector2, unlocked
 ## Ship list mini markers (`achievements/S_1..3`, `S_V`, `S_Q`; `_on` = earned in the PlayerProfile), as image
 ## names with their suffix ("S_1_on").
 static func mini_markers(ship_id: int) -> Array:
-	var achs := ship_achievements(ship_id)
 	var out := []
-	var names := ["S_1", "S_2", "S_3"]
-	var k := 0
-	for a in achs:
-		var nm: String
-		if String(a.id).ends_with("_VICTORY"):
-			nm = "S_V"
-		elif String(a.id).ends_with("_QUEST"):
-			nm = "S_Q"
-		elif k < 3:
-			nm = names[k]
-			k += 1
-		else:
-			continue
-		out.append("%s_%s" % [nm, "on" if a.get("unlocked", false) else "off"])
+	for a in ship_achievements(ship_id).slice(0, 5):
+		out.append("%s_%s" % [a.mini, "on" if a.get("unlocked", false) else "off"])
 	return out
+
+
+## CAchievement::OnRender with style 2 / 3 (the ship list's ShipButton): the 32 px mini icon (`miniIcon` /
+## `miniIconLocked` = `achievements/<mini>_on|off.png`), the victory dots of an earned `_VICTORY` (drawn for every
+## style), and with style 2 the COLOR_BUTTON_SELECT mini outline. No "New!" (ShipButton passes showNew false).
+static func draw_mini(ci: CanvasItem, a: Dictionary, p: Vector2, hot: bool) -> void:
+	var m := a.duplicate()
+	m.img = "achievements/%s_%s.png" % [a.get("mini", "S_1"), "on" if a.get("unlocked", false) else "off"]
+	m.dim = 32
+	draw_achievement(ci, m, p, false, 2 if hot else 3, false)
+
+
+## The hover half of the achievement screens' MouseMove (ShipBuilder / ShipSelect / ScoreKeeper / MenuScreen):
+## every entry of `achs` whose rect (in `ci`'s local coordinates) strictly contains `m` gets
+## AchievementTracker::SetTooltip (title + body, InstantTooltip; the last hit wins, as in the exe loops). `bp` = the
+## ship blueprint whose class fills the victory / quest marker texts. Returns the hovered index (-1 = none).
+static func achievement_hover(ci: CanvasItem, achs: Array, rects: Array, m: Vector2, bp := "") -> int:
+	var hit := -1
+	for i in mini(achs.size(), rects.size()):
+		var r: Rect2 = rects[i]
+		if m.x > r.position.x and m.x < r.end.x and m.y > r.position.y and m.y < r.end.y:
+			hit = i
+			var t := HangarView.achievement_text(String(achs[i].id), null, bp)
+			if t[1] != "":
+				TooltipService.request(t[1], {"title": t[0], "kind": &"achievement", "source": ci,
+					"instant": true, "ctx": {"id": achs[i].id}})
+	return hit

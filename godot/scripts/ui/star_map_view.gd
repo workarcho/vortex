@@ -94,6 +94,10 @@ func _process(d: float) -> void:
 	if _cli_hover != "":
 		_apply_cli_hover()
 	ship_angle = StarMap.marker_step(ship_angle, d, out_of_fuel())
+	if LastStand.waiting(run):
+		LastStand.step_wait(run, d)  # StarMap::OnLoop -> UpdateDangerZone while `waiting` runs (closes the map)
+		if not run.map_open:
+			return
 	if LastStand.active(run):
 		boss_angle = StarMap.marker_step(boss_angle, d, false)
 		boss_slide = LastStandMap.step_slide(boss_slide, run, d * GameClock.BASE)
@@ -222,6 +226,8 @@ func jump_state() -> String:
 
 
 func _hit(p: Vector2) -> String:
+	if LastStand.waiting(run):
+		return ""  # StarMap::MouseMove / OnTouch return early while `waiting` runs
 	if CLOSE_RECT.has_point(p):
 		return "close"
 	if profile.is_touch() and run.selected >= 0 and not out_of_fuel() and _jump_rect().has_point(p):
@@ -548,8 +554,9 @@ func _draw() -> void:
 	LastStandMap.draw_marker(self, run, o, boss_angle, boss_slide)  # after the player's marker
 	# 5. Rebel fleet over the beacons.
 	_draw_fleet(o)
-	# 6. Out of fuel: dark overlay over the map.
-	if nofuel:
+	# 6. Out of fuel / waiting (boss-level WAIT animation): dark overlay over the map.
+	var waiting := LastStand.waiting(run)
+	if nofuel or waiting:
 		draw_rect(WIN, Color(0, 0, 0, 0.4))
 	# 7. Frame outline (over the zone image), tabs, texts, buttons.
 	WindowFrame.draw_outline(self, WIN)
@@ -560,7 +567,10 @@ func _draw() -> void:
 	# 8. Target box on potentialLoc; out-of-fuel message.
 	if run.selected >= 0:
 		_target_box(screen_pos(run.selected))
-	if nofuel:
+	if waiting:
+		# waitingMessage (InitNoFuelText): x = 385 - (w - 12) / 2, i.e. centred 16 px right of fuelMessage.
+		_img("map/map_fuel_text_waiting.png", F + Vector2(WIN.size.x / 2 + 16, 62))
+	elif nofuel:
 		_img("map/map_fuel_text_nofuel.png", F + Vector2(WIN.size.x / 2, 62))
 	LastStandMap.draw_message(self, run, F)  # pc_boss box
 	# 9. Labels (skipped while out of fuel).
@@ -670,7 +680,8 @@ func _draw_buttons(nofuel: bool) -> void:
 	var cb := FtlData.texture("img/main_menus/button_cancel_base.png")
 	if cb:
 		draw_texture(cb, CLOSE_RECT.position + Vector2(-24, -8))
-	ShipScreen.text_button(self, CLOSE_RECT, FtlData.tr_id("button_cancel"), "hot" if h == "close" else "on")
+	ShipScreen.text_button(self, CLOSE_RECT, FtlData.tr_id("button_cancel"), "off" if LastStand.waiting(run)
+		else ("hot" if h == "close" else "on"))  # closeButton inactive while waiting
 	if _next_shown():
 		var t := FtlData.texture("img/map/side_nextsector.png")
 		if t:

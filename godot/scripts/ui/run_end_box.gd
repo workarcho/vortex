@@ -19,6 +19,11 @@ var layout := {}  # ScoreKeeper.button_layout result for the open window
 var labels := {}
 var hover := ""
 var _built_for := ""
+## GameOver::credits: GameOver::SetVictory(true) starts them (bShowingCredits); while they run only they are drawn
+## (OnRender returns after CreditScreen::OnRender) and the window's buttons ignore clicks; GameOver::OnLoop ends
+## them on CreditScreen::Done, Esc skips (KeyDown).
+var credits: CreditScreen
+var _credits_run: RunState  # the run whose victory credits were started
 
 
 func setup(r: RunState, cb: Callable) -> void:
@@ -31,6 +36,14 @@ func setup(r: RunState, cb: Callable) -> void:
 	stats_view.visible = false
 	add_child(stats_view)
 	stats_view.setup(null)
+	credits = CreditScreen.new()
+	credits.visible = false
+	add_child(credits)
+
+
+## The window shows its credits first (victory only).
+func showing_credits() -> bool:
+	return credits != null and credits.showing
 
 
 ## GameOver::OpenText: labels, auto widths (TextButton::UpdateAutoWidth: text width + 2 × margin 3) and the geometry.
@@ -44,14 +57,28 @@ func build() -> void:
 	_built_for = run.over
 
 
-func _process(_d: float) -> void:
+func _process(d: float) -> void:
 	visible = run != null and run.over != ""
 	mouse_filter = Control.MOUSE_FILTER_STOP if visible else Control.MOUSE_FILTER_IGNORE
 	if not visible:
 		stats_view.visible = false
+		credits.skip()
 		return
 	if _built_for != run.over or layout.is_empty():
 		build()
+	if run.over == "victory" and _credits_run != run:  # CommandGui::Victory -> GameOver::SetVictory(true, ...)
+		_credits_run = run
+		credits.start(run.ship.ship_title, LastStand.victory_crew_names(run))
+		if run.has_meta(&"debug_credits_scroll"):  # --credits-scroll=PX (screenshots)
+			credits.scroll = float(run.get_meta(&"debug_credits_scroll"))
+			credits.pausing = -1.0
+	if credits.showing:
+		credits.step(d)
+		if credits.done():
+			credits.skip()  # GameOver::OnLoop: bShowingCredits = false once CreditScreen::Done
+		hover = ""
+		queue_redraw()
+		return
 	var h := "" if stats_view.visible else button_at(TooltipService.local_mouse(self))
 	if h != hover and h != "":
 		FtlData.play("hoverBeep")
@@ -91,7 +118,7 @@ func press(b: String) -> void:
 
 
 func _draw() -> void:
-	if run == null or run.over == "" or layout.is_empty():
+	if run == null or run.over == "" or layout.is_empty() or showing_credits():
 		return
 	draw_rect(HudLayout.cover_rect(self, TooltipService.touch), Color(0, 0, 0, 0.85))  # RenderStatic tint × 0.15
 	var x := float(layout.x)

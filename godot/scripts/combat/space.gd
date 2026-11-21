@@ -94,6 +94,45 @@ var fixed_rotation := 0.0
 var legacy_hud := false
 
 
+## Stencil of the view (CombatControl::DrawHostileBox 0x0055e190 + RenderTarget 0x0055ff00: the frame is drawn,
+## then `box_hostiles_mask.png` at the box position sets stencil bit 0x20, and the whole enemy ship — shield bubble
+## and super shield, hull, rooms, projectiles (CompleteShip::OnRenderShip) — is drawn with STENCIL_USE 0x20). The
+## container composites its SubViewport only where the mask is opaque. `mask_rect` = the container's rectangle in
+## mask pixels (PC frame units; the container may be scaled, e.g. the touch TARGET window). null = no mask.
+const CLIP_SHADER := """
+shader_type canvas_item;
+render_mode blend_premul_alpha;
+uniform sampler2D clip_mask : filter_nearest;
+uniform vec4 mask_rect;
+void fragment() {
+	vec2 mp = mask_rect.xy + UV * mask_rect.zw;
+	vec2 ms = vec2(textureSize(clip_mask, 0));
+	bool inside = all(greaterThanEqual(mp, vec2(0.0))) && all(lessThan(mp, ms));
+	COLOR *= inside ? step(0.5, texture(clip_mask, mp / ms).a) : 0.0;
+}
+"""
+var clip_mask: Texture2D = null
+
+
+func set_clip_mask(mask: Texture2D, mask_rect := Rect2()) -> void:
+	clip_mask = mask
+	if mask == null:
+		var comp := CanvasItemMaterial.new()
+		comp.blend_mode = CanvasItemMaterial.BLEND_MODE_PREMULT_ALPHA  # same compositing as setup()
+		material = comp
+		return
+	var mat := material as ShaderMaterial
+	if mat == null:
+		var sh := Shader.new()
+		sh.code = CLIP_SHADER
+		mat = ShaderMaterial.new()
+		mat.shader = sh
+		material = mat
+	mat.set_shader_parameter("clip_mask", mask)
+	mat.set_shader_parameter("mask_rect", Vector4(mask_rect.position.x, mask_rect.position.y,
+		mask_rect.size.x, mask_rect.size.y))
+
+
 ## Places the view: fixed FTL origin (zoom 1) or, in the debug view, fit the ship.
 func set_fixed_origin(o: Variant, zoom := 1.0) -> void:
 	fixed_origin = o

@@ -94,7 +94,10 @@ func apply(intent: Dictionary) -> bool:
 			MENU_STATS:
 				pending = "stats"
 				return true
-			MENU_TUTORIAL, MENU_CREDITS:
+			MENU_CREDITS:  # MainMenu: CreditScreen::Start("", {}) (no ship: starts scrolled, no pause)
+				pending = "credits"
+				return true
+			MENU_TUTORIAL:
 				pending = "toast:%s is not implemented yet" % t.trim_prefix("menu_").capitalize()
 				return true
 		return false

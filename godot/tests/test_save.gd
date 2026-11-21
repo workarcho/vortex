@@ -54,6 +54,7 @@ func _run() -> void:
 	_round_trip()
 	_codec()
 	await _combat_round_trip()
+	await _battle_round_trip()
 	_continue_button()
 	_deleted_at_run_end()
 	_profile_persistence()
@@ -339,6 +340,170 @@ func _combat_round_trip() -> void:
 	RunState.current = null
 	MAIN.run_mode = false
 	SaveGame.delete()
+
+
+# ------------------------------------------------------------------ battle in progress (§1.4, BattleSave)
+
+## A battle frozen mid-fight: shots of every kind in flight (laser in both spaces, missile, beam, bomb, drone shot,
+## asteroid, ASB shot), a combat drone in space, a charged weapon with its target and a volley half fired, shield
+## animations, a lockdown shard, the enemy AI timers and a crew member walking. Save, Continue, compare.
+func _battle_round_trip() -> void:
+	print("Battle in progress (§1.4, BattleSave)")
+	MAIN.run_mode = true
+	MAIN.input_mode = InputProfile.PC
+	MAIN.player_ship_name = "PLAYER_SHIP_CIRCLE"
+	var r := RunState.new_run(4242)
+	close_dialogs(r)
+	r.show_event(r.engine.base_event("PIRATE"))
+	close_dialogs(r)
+	RunState.current = r
+	await _start_main()
+	var cb: Combat = main.combat
+	cb.paused = true
+	var ps: Space = main.player_space
+	var es: Space = main.enemy_space
+	var pl: ShipState = ps.ship
+	var en: ShipState = es.ship
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	# Drone: a combat drone deployed and flown a little.
+	main._replace_drones(pl, ["COMBAT_1"])
+	pl.drone_parts = 5
+	var dr: Drone = null
+	for d in pl.drones:
+		if d.kind == Drone.Kind.COMBAT:
+			dr = d
+	check("player has a combat drone", dr != null, true)
+	if dr != null and not dr.deployed:
+		pl.reactor_max += 4
+		DroneSystemRule.power_drone(pl, dr)
+	if dr != null:
+		for i in 20:
+			dr.step(1.0)
+	# Weapon: target, charge, a volley with shots still queued.
+	var w: WeaponState = pl.weapons[0]
+	var room: int = en.layout.rooms[1].id
+	w.set_target(en, room, en.room_rect(room).get_center(), false)
+	w.charge = 1.25
+	w.queued_shots = 1
+	w.shot_timer = 0.1
+	w.volley_target = en
+	w.volley_point = w.target_point
+	w.fire_anim = 0.12
+	# Shots in flight.
+	var laser := WeaponState.new(FtlData.weapon_blueprint("LASER_BURST_2"), 0)
+	var missile := WeaponState.new(FtlData.weapon_blueprint("MISSILES_2_PLAYER"), 0)
+	var beam := WeaponState.new(FtlData.weapon_blueprint("BEAM_1"), 0)
+	var bomb := WeaponState.new(FtlData.weapon_blueprint("BOMB_1"), 0)
+	var target_pt := en.room_rect(room).get_center()
+	var home_pt := pl.room_rect(pl.layout.rooms[0].id).get_center()
+	cb._add_projectile(ps, es, laser, target_pt)  # leaving the player's space
+	cb._add_projectile(es, ps, laser, home_pt)  # enemy shot leaving the enemy's space
+	cb._add_projectile(ps, es, missile, target_pt)
+	var b := Beam.new()
+	b.setup(beam, ps, es, target_pt, target_pt + Vector2(30, 0), rng)
+	cb._add_shot(es, b)
+	var bo := Bomb.new()
+	bo.setup(bomb, ps, es, target_pt, rng)
+	cb._add_shot(es, bo)
+	var ds := Projectile.new()
+	ds.setup_drone(laser, pl, es, en.shield_center + Vector2(-300, 0), target_pt, en)
+	es.world.add_child(ds)
+	cb.projectiles.append(ds)
+	var ast := Projectile.new()
+	ast.setup_asteroid(ps, pl.shield_center + Vector2(500, -200), home_pt, 2, 40.0)
+	cb._add_shot(ps, ast)
+	var pds := PdsShot.new()
+	pds.setup_pds(ps, ps, pl.shield_center + Vector2(-400, 100), home_pt, false, false, 0)
+	cb._add_shot(ps, pds)
+	for i in 3:
+		for p in cb.projectiles:
+			p.step(1.0, rng)
+	var before := []
+	for p in cb.projectiles:
+		before.append(_shot_key(p, pl, en))
+	# Ship battle fields, AI, crew walking.
+	en.shield_down_t = 0.2
+	en.shield_down_point = Vector2(12, 34)
+	LockdownRule._add_shard(en, room, en.room_rect(room).get_center(), en.room_rect(room).position, "crystal_1")
+	var ai: ShipAI = cb.ais[es]
+	ai.escape_timer = 7.5
+	ai.surrender_threshold = 2
+	ai.escape_threshold = 1
+	var c: CrewMember = pl.crew[0]
+	var dest := -1
+	for rm in pl.layout.rooms:
+		if rm.id != c.room and c.move_to_room(pl, rm.id):
+			dest = rm.id
+			break
+	for i in 6:
+		c.update_movement(pl, 1.0 / 16.0)
+	var walk := [c.pos, c.target_room, c.slot]
+	var drone_key: Array = [dr.pos, dr.destination, dr.aim_angle, dr.space_ship == en] if dr != null else []
+	check("saved mid-battle", main.save_run_now(), true)
+	var saved := SaveGame.read()
+	check("save has the battle", saved.has("battle"), true)
+	check("every shot saved", saved.get("battle", {}).get("projectiles", []).size(), before.size())
+	await _stop_main()
+	RunState.current = null
+	var r2 := SaveGame.load_run()
+	RunState.current = r2
+	main = load("res://main.tscn").instantiate()
+	add_child(main)  # _ready builds the scene and applies the battle; compared before any frame runs
+	main.combat.paused = true
+	cb = main.combat
+	pl = main.player_space.ship
+	en = main.enemy_space.ship
+	var after := []
+	for p in cb.projectiles:
+		after.append(_shot_key(p, pl, en))
+	check("shots restored (class, ships, spaces, position, heading, damage, flags, animation)", after, before)
+	check("shots live in their space's world", cb.projectiles.all(func(p): return p.get_parent() != null), true)
+	var w2: WeaponState = pl.weapons[0]
+	check("weapon target / charge / volley", [w2.target_ship == en, w2.target_room, w2.charge, w2.queued_shots,
+		w2.volley_target == en, w2.fire_anim], [true, room, 1.25, 1, true, 0.12])
+	var dr2: Drone = null
+	for d in pl.drones:
+		if d.kind == Drone.Kind.COMBAT:
+			dr2 = d
+	if dr2 != null:
+		check("drone in space where it was", [dr2.deployed, dr2.powered, [dr2.pos, dr2.destination, dr2.aim_angle,
+			dr2.space_ship == en]], [true, true, drone_key])
+	check("shield down animation", [en.shield_down_t, en.shield_down_point], [0.2, Vector2(12, 34)])
+	check("lockdown shard", en.lockdowns.size(), 1)
+	var ai2: ShipAI = cb.ais[main.enemy_space]
+	check("enemy AI (ShipAI::Save)", [ai2.escape_timer, ai2.surrender_threshold, ai2.escape_threshold], [7.5, 2, 1])
+	var c2: CrewMember = pl.crew[0]
+	check("crew walks on from where it stood", [c2.pos, c2.target_room, c2.slot, c2.is_walking(), dest >= 0],
+		[walk[0], walk[1], walk[2], true, true])
+	# The fight goes on from there.
+	cb.paused = false
+	await frames(30)
+	check("fight resumes", is_instance_valid(main), true)
+	await _stop_main()
+	RunState.current = null
+	MAIN.run_mode = false
+	MAIN.player_ship_name = "PLAYER_SHIP_HARD"
+	SaveGame.delete()
+
+
+func _shot_key(p: Node, pl: ShipState, en: ShipState) -> Array:
+	var ship := func(s): return "P" if s == pl else ("E" if s == en else "-")
+	var k := [SaveCodec.class_of(p), p.position.round(), p.z_index]
+	if p is Projectile:
+		k.append_array([ship.call(p.owner_ship), ship.call(p.target_ship), ship.call(p.current_space.ship),
+			ship.call(p.destination_space.ship), snappedf(p.heading, 0.01), p.speed_units, p.target, p.dmg.damage,
+			p.dmg.owner, p.missed, p.passed_target, snappedf(p._anim_time, 0.001), p._anim.size(),
+			p.static_tex != null, String(p.weapon.get("name", ""))])
+		if p is PdsShot:
+			k.append_array([p.start_point, snappedf(p.current_scale, 0.001)])
+	elif p is Beam:
+		k.append_array([ship.call(p.owner_ship), ship.call(p.target_ship), p.current, p.target1, p.target2,
+			p.sub_start, p.started, p.dmg.damage, p.source_line != null, String(p.bp.get("name", ""))])
+	elif p is Bomb:
+		k.append_array([ship.call(p.owner_ship), ship.call(p.target_ship), p.phase, snappedf(p.timer, 0.001),
+			p.missed, p.target, p.dmg.damage])
+	return k
 
 
 # ------------------------------------------------------------------ Continue / New Game

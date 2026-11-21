@@ -60,7 +60,7 @@ static func sandbox_space() -> Dictionary:
 func setup(sp: Dictionary, hz: HazardRule, player: ShipState) -> void:
 	space = sp
 	hazard = hz
-	env = hz.env if hz != null else -1
+	env = hz.visual_env() if hz != null else -1  # stacked environments: what OnRenderBackground / Foreground show
 	ship = player
 	set_anchors_preset(Control.PRESET_FULL_RECT)  # the 1280×720 hud_root frame
 	mouse_filter = Control.MOUSE_FILTER_IGNORE

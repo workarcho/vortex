@@ -33,6 +33,9 @@ func _run() -> void:
 	test_surges()
 	test_automated_and_crew()
 	test_wait_and_stalemate()
+	test_wait_animation()
+	test_super_drone_save()
+	test_credits()
 
 
 func new_run(seed: int, diff := EventEngine.Difficulty.NORMAL, ae := true) -> RunState:
@@ -213,13 +216,24 @@ func test_fight_flow() -> void:
 	check("no game over once won", LastStand.already_won(r), true)
 	es.explosion.done = true
 	r.check_combat(es, 0.1)
-	check("BOSS_DESTROYED", String(r.dialog.get("name", "")), "BOSS_DESTROYED")
 	check("boss level cleared", LastStand.active(r), false)
-	r.tick(0.1)
-	check("victory waits for the box", r.over, "")
-	LastStand._close_dialogs(r)
-	r.tick(0.1)
-	check("victory", [r.over, r.over_cause], ["victory", "gameover_win"])
+	# WorldManager::OnLoop: Defeated -> ClearBoss + CommandGui::Victory, then UpdateLocation(BOSS_DESTROYED), one
+	# frame; the event box sits behind the game-over window (first focus window) and is never seen.
+	check("victory in the same frame", [r.over, r.over_cause], ["victory", "gameover_win"])
+	check("BOSS_DESTROYED applied (logged), its box not shown", [r.log.any(func(l): return l == \
+		"flagship event BOSS_DESTROYED"), r.phase, r.dialog.is_empty()], [true, RunState.Phase.IDLE, true])
+	check("victory crew names = the living player crew", LastStand.victory_crew_names(r).size(),
+		r.ship.crew.filter(func(c): return c.player_owned and c.is_alive() and not c.is_drone()).size())
+	# The window shows the credits first (GameOver::SetVictory -> CreditScreen::Start).
+	var box := RunEndBox.new()
+	box.setup(r, Callable())
+	add_child(box)
+	box._process(0.016)
+	check("credits first", [box.showing_credits(), box.credits.ship_name], [true, r.ship.ship_title])
+	box.credits.skip()  # Esc (GameOver::KeyDown)
+	box._process(0.016)
+	check("Esc: the window", box.showing_credits(), false)
+	box.queue_free()
 
 
 func test_surges() -> void:
@@ -288,7 +302,9 @@ func test_wait_and_stalemate() -> void:
 	LastStand._close_dialogs(r)
 	check("wait allowed with fuel (no ship)", r.can_wait(), true)
 	var before := int(r.boss.jumping)
+	r.map_open = true
 	check("wait", r.apply(RunIntent.make(RunIntent.WAIT)), true)
+	LastStand.step_wait(r, LastStand.WAIT_TIME)
 	check("flagship turn on wait", int(r.boss.jumping) != before, true)
 	LastStand.debug_fight(r, 1)
 	check("no wait with the flagship here", r.can_wait(), false)
@@ -301,3 +317,113 @@ func test_wait_and_stalemate() -> void:
 		r.check_combat(es, 1.0)
 	check("BOSS_STALEMATE", String(r.dialog.get("name", "")), "BOSS_STALEMATE")
 	check("same stage again", r.boss.next_stage, 1)
+
+
+func test_wait_animation() -> void:
+	print("WAIT animation in the boss level (StarMap waiting, UpdateDangerZone)")
+	var r := new_run(9)
+	LastStand._close_dialogs(r)
+	LastStand.update_boss(r)  # a prepare turn: the flagship is jumping
+	check("flagship jumping", r.boss.jumping, true)
+	var at := LastStand.boss_beacon(r)
+	var nxt := LastStand.next_hop(r)
+	check("map opens", r.apply(RunIntent.make(RunIntent.OPEN_MAP)), true)
+	check("wait starts", r.apply(RunIntent.make(RunIntent.WAIT)), true)
+	check("waiting, map still open, no turn yet", [LastStand.waiting(r), r.map_open, LastStand.boss_beacon(r),
+		r.boss.jumping], [true, true, at, true])
+	check("close refused while waiting", r.apply(RunIntent.make(RunIntent.CLOSE_MAP)), false)
+	check("wait refused while waiting", [r.can_wait(), r.apply(RunIntent.make(RunIntent.WAIT))], [false, false])
+	check("beacons ignored while waiting", r.apply(RunIntent.make(RunIntent.SELECT_BEACON,
+		r.map.links_of(r.current_beacon)[0])), false)
+	LastStand.step_wait(r, 1.0)
+	check("half way", LastStand.wait_progress(r), 0.5)
+	var pa: Vector2 = r.map.beacons[at].pos
+	var pb: Vector2 = r.map.beacons[nxt].pos
+	var wp: Vector2 = LastStandMap.wait_position(r)
+	check("marker 0.6 x progress along the hop", wp.distance_to(pa + (pb - pa) * 0.3) < 0.001, true)
+	check("no idle slide while waiting", LastStandMap.step_slide(5.0, r, 1.0), 0.0)
+	LastStand.step_wait(r, 0.99)
+	check("still waiting at 1.99 s", LastStand.waiting(r), true)
+	LastStand.step_wait(r, 0.02)
+	check("done: map closed, flagship moved", [LastStand.waiting(r), r.map_open, LastStand.boss_beacon(r)],
+		[false, false, nxt])
+	check("no wait position afterwards", LastStandMap.wait_position(r), null)
+	# A prepare turn during the wait: the marker does not move (not jumping).
+	var r2 := new_run(9)
+	LastStand._close_dialogs(r2)
+	r2.map_open = true
+	LastStand.wait(r2)
+	LastStand.step_wait(r2, 1.0)
+	check("idle flagship: no wait slide", LastStandMap.wait_position(r2), null)
+	LastStand.step_wait(r2, 1.0)
+	check("prepare turn taken at the end", r2.boss.jumping, true)
+
+
+func test_super_drone_save() -> void:
+	print("Surge drones in a mid-fight save (ShipManager::SaveSuperDrones / LoadSuperDrones)")
+	var r := new_run(4)
+	var B := r.boss
+	LastStand.debug_fight(r, 2)
+	var es := fight(r)
+	B.power_time = float(B.power_goal) + 0.01
+	r.check_combat(es, 0.1)
+	var sd := FlagshipRule.deployed_super_drones(es)
+	sd[0].lifespan = 1
+	var snap := ShipSave.snapshot(es)
+	check("7 surge drones saved", (snap.get("super_drones", []) as Array).size(), 7)
+	var es2 := r.build_enemy_ship()
+	ShipSave.apply(es2, snap)
+	check("not rebuilt before the opponent is set", FlagshipRule.super_drones(es2).size(), 0)
+	es2.opponent = r.ship
+	ShipSave.redeploy(es2)
+	var sd2 := FlagshipRule.deployed_super_drones(es2)
+	check("7 restored, 6 deployed", [FlagshipRule.super_drones(es2).size(), sd2.size()], [7, 6])
+	check("same blueprints", FlagshipRule.super_drones(es2).map(func(d): return d.bp.name),
+		FlagshipRule.super_drones(es).map(func(d): return d.bp.name))
+	check("shots left kept, aimed at the player", [sd2[0].lifespan, sd2[1].lifespan, sd2[1].target_ship == r.ship,
+		sd2[1].powered], [1, 2, true, true])
+	check("no power needed", sd2.all(func(d): return int(d.bp.power) == 0), true)
+
+
+func test_credits() -> void:
+	print("Credits (CreditScreen::Start / OnRender / Done)")
+	check("crew line 3", CreditScreen.crew_text(["A", "B", "C"]), "A, B and C")
+	check("crew line 2", CreditScreen.crew_text(["A", "B"]), "A and B")
+	check("crew line 1", CreditScreen.crew_text(["A"]), "A")
+	check("missing text", CreditScreen.text_of("font"), "Could not find: font")
+	check("known text", CreditScreen.text_of("game_from"), "A game from:")
+	var c := CreditScreen.new()
+	c.start("The Kestrel", ["Ann", "Bob"])
+	check("backers from credits.txt", c.names.size(), 1016)
+	check("first / last backer", [c.names[0], c.names[-1]], ["A and K", "Zalastik"])
+	check("start: pause 5, scroll 0, text invisible", [c.pausing, c.scroll, c.text_alpha()], [5.0, 0.0, 0.0])
+	c.step(0.5)
+	check("fade in", is_equal_approx(c.text_alpha(), 0.5), true)
+	c.step(4.5)
+	check("still until 5 s", c.scroll, 0.0)
+	c.step(1.0)
+	check("56 px/s", is_equal_approx(c.scroll, -56.0), true)
+	var t := 6.0
+	var held := 0.0
+	while not c.done() and t < 600.0:
+		c.step(1.0 / 64.0)
+		t += 1.0 / 64.0
+		if c.scroll == CreditScreen.HOLD_AT:
+			held += 1.0 / 64.0
+	check("hold 3 s at -720", absf(held - 3.0) < 0.05, true)
+	var want := 5.0 + 3.0 + (338 * 40 + 3906) / 56.0
+	check("done after the last line (%.1f s)" % t, absf(t - want) < 0.1, true)
+	var m := CreditScreen.new()
+	m.start("", [])
+	check("no ship (main menu): scroll -70, no pause", [m.scroll, m.pausing, m.text_alpha()], [-70.0, 0.0, 1.0])
+	m.on_touch(true)
+	m.step(1.0)
+	check("touch hint shown", m.skip_timer, 1.0)
+	check("held 1 s: not yet", m.done(), false)
+	m.step(1.0)
+	check("held 2 s: skip", m.done(), true)
+	m.on_touch(false)
+	m.step(0.5)
+	check("hint fades", is_equal_approx(m.skip_timer, 0.5), true)
+	c.free()
+	m.free()

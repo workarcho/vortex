@@ -186,6 +186,36 @@ static func prepare_super_drones(es: ShipState, difficulty: int, rng: RandomNumb
 	FtlData.play("droneLaunch")
 
 
+## ShipManager::SaveSuperDrones (ExportBattleState, mid-fight save): per surge drone its blueprint name, the drone
+## state (SaveState: flight data, not kept here like other drones), deployed, destroyed, powered. Ours also keeps
+## the shots left (lifespan) and the target side.
+static func save_super_drones(ship: ShipState) -> Array:
+	return super_drones(ship).map(func(d): return {"name": String(d.bp.get("name", "")), "deployed": d.deployed,
+		"dead": d.dead, "powered": d.powered, "lifespan": d.lifespan})
+
+
+## ShipManager::LoadSuperDrones (ImportBattleState): a drone per entry from its blueprint (power requirement 0),
+## SetDeployed / SetDestroyed / SetPowered from the save, and a deployed one goes back into space through
+## newDroneArrivals (our `on_deploy`, aimed at the opponent). Call once the opponent is set (ShipSave.redeploy).
+static func load_super_drones(ship: ShipState, saved: Array) -> void:
+	var list := []
+	for e in saved:
+		var bp := FtlData.drone_blueprint(String(e.get("name", "")))
+		if bp.is_empty():
+			continue
+		bp = bp.duplicate()
+		bp.power = 0
+		var d := Drone.new(bp, ship, 100 + list.size())
+		d.powered = bool(e.get("powered", false))
+		if bool(e.get("deployed", false)) and not bool(e.get("dead", false)):
+			d.deployed = true
+			d.on_deploy()  # resets lifespan: restored below
+			d.target_ship = ship.opponent
+		d.lifespan = int(e.get("lifespan", SURGE_LIFESPAN))
+		list.append(d)
+	ship.set_meta("super_drones", list)
+
+
 ## Surge drones that used their shots (or were shot down) leave space; a dying flagship's are depowered.
 static func tick_super_drones(es: ShipState) -> void:
 	for d in super_drones(es):

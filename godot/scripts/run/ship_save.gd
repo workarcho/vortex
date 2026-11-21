@@ -8,12 +8,14 @@ extends RefCounted
 ## - weapons / artillery: blueprint name + their WeaponState variables (targets and volleys in flight dropped);
 ## - drones: blueprint name, powered / deployed, rebuild timer; deployed drones are re-deployed by `redeploy` once
 ##   the scene has its combat (crew drones spawn again, space drones start from their ship);
+## - the flagship's surge drones (ShipManager::SaveSuperDrones): name, deployed, dead, powered, shots left;
+##   rebuilt by `redeploy` (FlagshipRule.load_super_drones);
 ## - crew (both sides, this ship's crew list order) and the clone queue: race / side + every CrewMember variable
-##   except the transient combat ones (CREW_SKIP); each one is put back on its own slot (a walk in progress ends on
-##   the slot it was heading to);
+##   except the transient combat ones (CREW_SKIP); each one gets its slot back (the slot it was heading to) and,
+##   saved away from it, walks there from where it stood (ImportShip: SetPosition + MoveToRoom);
 ## - environment: oxygen per room, door states, fire spread timers.
-## Not saved (vanilla saves some of these): projectiles in flight, drone flight paths, hacking / mind control pulses,
-## crew fights and crystal lockdown shards. A mid-combat save resumes the fight with the ships as they were.
+## The battle itself (projectiles in flight, drones in space, weapon targets and volleys, hacking / mind control,
+## shield animations, lockdown shards, teleports, enemy AI) is BattleSave's part of the save.
 
 const SHIP_FIELDS := ["ship_title", "hull", "max_hull", "shield_layers", "shield_charger", "weapon_slots",
 	"missiles", "fuel", "scrap", "ftl_charge", "autofire", "fires", "breaches", "fire_heading", "reactor_max",
@@ -41,6 +43,8 @@ static func snapshot(ship: ShipState) -> Dictionary:
 	d.artillery = ship.artillery.map(func(w): return _weapon(w))
 	d.drones = ship.drones.map(func(dr): return {"name": String(dr.bp.get("name", "")), "powered": dr.powered,
 		"deployed": dr.deployed, "destroyed_timer": dr.destroyed_timer, "slot": dr.slot})
+	if ship.has_meta("super_drones"):  # the flagship's surge drones (ShipManager::SaveSuperDrones)
+		d.super_drones = FlagshipRule.save_super_drones(ship)
 	var crew := []
 	for c in ship.crew:
 		if c.is_drone():
@@ -114,6 +118,8 @@ static func apply(ship: ShipState, d: Dictionary) -> void:
 			pending.append([dr, bool(dd.get("deployed", false))])
 	ship.drones = drones
 	ship.set_meta(&"save_drones", pending)
+	if d.has("super_drones"):
+		ship.set_meta(&"save_super_drones", d.super_drones)  # rebuilt by `redeploy` (they need the opponent)
 	# Crew.
 	ship.crew.clear()
 	ship.clone_queue.clear()
@@ -162,7 +168,17 @@ static func _seat(ship: ShipState, c: CrewMember) -> void:
 					break
 	if slot < 0:
 		return
+	var at := c.pos
+	var at_room := c.room
 	c.place(ship, room, slot)
+	# ShipManager::ImportShip: SetPosition(saved location) then MoveToRoom(room, slot, force): a crew member saved
+	# away from its slot (walking, fighting in another room) walks there from where it stood.
+	if at_room >= 0 and at_room < ship.layout.rooms.size() and at.distance_to(c.pos) > CrewMember.SNAP:
+		c.pos = at
+		c.room = at_room
+		c.slot = -1
+		if not c.walk_to_slot(ship, room, slot):
+			c.place(ship, room, slot)
 
 
 static func _slot_taken(ship: ShipState, who: CrewMember, room: int, slot: int) -> bool:
@@ -176,6 +192,9 @@ static func _slot_taken(ship: ShipState, who: CrewMember, room: int, slot: int) 
 ## After the scene built the combat (opponents set): drones that were powered are powered again — a deployed one
 ## for free (the part was paid before the save), the others like a click (one part each, as they were).
 static func redeploy(ship: ShipState) -> void:
+	if ship.has_meta(&"save_super_drones"):
+		FlagshipRule.load_super_drones(ship, ship.get_meta(&"save_super_drones"))  # ShipManager::LoadSuperDrones
+		ship.remove_meta(&"save_super_drones")
 	if not ship.has_meta(&"save_drones"):
 		return
 	var pending: Array = ship.get_meta(&"save_drones")

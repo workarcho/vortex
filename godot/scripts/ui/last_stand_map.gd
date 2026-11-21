@@ -39,8 +39,8 @@ static func draw_path(v: Control, run: RunState, o: Vector2) -> void:
 static func step_slide(slide: float, run: RunState, f: float) -> float:
 	var a := boss_beacon(run)
 	var b := LastStand.next_hop(run)
-	if a < 0 or b < 0 or not bool(run.boss.get("jumping", false)):
-		return 0.0
+	if a < 0 or b < 0 or not bool(run.boss.get("jumping", false)) or LastStand.waiting(run):
+		return 0.0  # the WAIT animation positions the marker itself (wait_position)
 	var hop := (run.map.beacons[b].pos as Vector2).distance_to(run.map.beacons[a].pos)
 	slide += 2.0 * SLIDE * f
 	if slide > SLIDE_RESET or slide > hop:
@@ -48,8 +48,21 @@ static func step_slide(slide: float, run: RunState, f: float) -> float:
 	return slide
 
 
+## The flagship's position while the WAIT animation runs and it is jumping (UpdateDangerZone: bossPosition =
+## beacon + progress x 0.6 x hop, drawn at full alpha, no idle slide); null otherwise.
+static func wait_position(run: RunState) -> Variant:
+	var a := boss_beacon(run)
+	var b := LastStand.next_hop(run)
+	if a < 0 or b < 0 or not LastStand.waiting(run) or not bool(run.boss.get("jumping", false)):
+		return null
+	var pa: Vector2 = run.map.beacons[a].pos
+	var pb: Vector2 = run.map.beacons[b].pos
+	return pa + (pb - pa) * (LastStand.wait_progress(run) * LastStand.WAIT_SLIDE)
+
+
 ## Flagship marker: map_icon_boss.png at (-10, -32) in a frame rotated by `angle` (orbit like the player's marker)
-## while idle; while jumping it slides toward the next hop, facing it, fading once > 10 px out.
+## while idle; while jumping it slides toward the next hop, facing it, fading once > 10 px out; during the WAIT
+## animation it moves 60 % of the hop over the 2 s instead (`wait_position`).
 static func draw_marker(v: Control, run: RunState, o: Vector2, angle: float, slide: float) -> void:
 	var a := boss_beacon(run)
 	if a < 0:
@@ -66,6 +79,10 @@ static func draw_marker(v: Control, run: RunState, o: Vector2, angle: float, sli
 	var dir := ((run.map.beacons[b].pos as Vector2) - (run.map.beacons[a].pos as Vector2)).normalized()
 	var pos := sp + dir * slide
 	var alpha := 1.0 if slide <= FADE_FROM else pow(1.0 - (slide - FADE_FROM) / FADE_FROM, 2.0)
+	var wp: Variant = wait_position(run)
+	if wp != null:
+		pos = o + (wp as Vector2)
+		alpha = 1.0
 	var h := rad_to_deg(acos(clampf(dir.x, -1.0, 1.0)))
 	if dir.y < 0.0:
 		h = -h

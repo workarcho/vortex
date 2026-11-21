@@ -113,6 +113,7 @@ var hazard_hud: HazardHud
 var asteroid_layers: AsteroidLayers
 var asteroid_front: AsteroidLayers  # asteroid_back3 again over the player ship, only while jumping
 var space_backdrop: SpaceBackdrop  # beacon background + planet / sun / pulsar / fleet (rules/backgrounds.md)
+var screen_shake: ScreenShake  # CommandGui::UpdateShake: the HUD shakes on player hull damage / ASB shots
 var run_end_box: RunEndBox
 var event_box: EventBox
 var focus_dim: ColorRect  # tint under full-focus windows (ship screens, beacon map)
@@ -414,6 +415,8 @@ func _build() -> void:
 		ShipSave.redeploy(run.ship)  # continued run: drones that were powered (opponents set now)
 		if has_enemy:
 			ShipSave.redeploy(es)
+		# Continued run: projectiles in flight, drones in space, volleys, teleports ... (BattleSave, once).
+		BattleSave.apply(combat, SaveGame.take_battle(run), run.ship, es if has_enemy else null)
 	else:
 		player_space.setup(ShipState.new(player_ship_name, true))
 		enemy_space.setup(ShipState.new(enemy_ship_name, false))
@@ -522,6 +525,10 @@ func _build() -> void:
 		run_end_box.setup(run, _on_run_end_command)
 		hud_root.add_child(run_end_box)
 
+	screen_shake = ScreenShake.new()
+	screen_shake.setup(player_space.ship, _screen_shake_targets, func() -> HazardRule:
+		return run.hazard if run != null else null)
+	add_child(screen_shake)
 	_build_debug()
 	if input_mode == InputProfile.TOUCH:  # touch UI: full-frame windows centred in the canvas (wide / tall screens)
 		# The band offset first, then the windows (_touch_center_band re-centres them with the new offset).
@@ -579,6 +586,20 @@ func _build_armament_panels() -> void:
 			systems_bar.columns["drones"].visible = not dvert
 	if touch and _touch_sig != "":  # rebuilt after the first layout: place the columns again
 		_touch_layout()
+
+
+## CommandGui::RenderStatic's shaken block (rules/hud_layout.md "Screen shake"): everything drawn inside the
+## UpdateShake translate — FTL / SHIP / MENU buttons, enemy window and ship, crew list, system / weapon / drone
+## bars, pause text, hazard / flagship status, ShipStatus — plus the touch-only HUD pieces. Not the background,
+## asteroid layers, player ship or focus windows.
+func _screen_shake_targets() -> Array:
+	var out: Array = [enemy_window_back, enemy_space, command_hud, enemy_window, crew_list, systems_bar,
+		weapon_panel, drone_panel, pause_overlay, hazard_hud, ship_status, touch_buttons, touch_power, pan_arrows]
+	if hud_root != null:
+		for c in hud_root.get_children():
+			if c is FlagshipHud:
+				out.append(c)
+	return out
 
 
 func _button(text: String, cb: Callable) -> Button:
@@ -706,7 +727,7 @@ func save_run_now() -> bool:
 	if run == null or not run_mode:
 		return false
 	var es: ShipState = enemy_space.ship if has_enemy and enemy_space != null else null
-	var ok := SaveGame.save_run(run, es, run_setup)
+	var ok := SaveGame.save_run(run, es, run_setup, combat)
 	PlayerProfile.current().save()
 	return ok
 
@@ -1791,6 +1812,7 @@ func _rebuild() -> void:
 	touch_buttons = null
 	pan_arrows = null
 	_ppan_backing = null
+	screen_shake = null
 	_modal_paused = false
 	_build()
 	_apply_view()
@@ -1858,8 +1880,8 @@ func _process(delta: float) -> void:
 	FtlData.set_loop("cloneBroken", ClonebayRule.dying(me) and not combat.paused and not me.is_destroyed(), 0.5)
 	# nebula (SpaceManager::OnLoop: UpdateSoundLoop("nebula", bNebula && !lowend ? 1 : 0)): the ambient loop of a
 	# nebula / ion storm beacon (silent while paused like every loop; rules/hazards.md §5).
-	FtlData.set_loop("nebula", run != null and run.hazard != null and run.hazard.env in [HazardRule.Env.NEBULA,
-		HazardRule.Env.STORM] and not combat.paused, 0.5)
+	FtlData.set_loop("nebula", run != null and run.hazard != null and run.hazard.has_env(HazardRule.Env.NEBULA)
+		and not combat.paused, 0.5)
 	# Count-driven loops (scripts/audio/ship_sounds.gd): extinguish / healing / repair / shrikeRepair
 	# (ShipManager::UpdateCrewmembers), fire (Spreader<Fire>::UpdateSpread), brawling (CrewMemberFactory::OnLoop),
 	# PauseLoops pauses them (all loops but distress) while paused.
@@ -2058,6 +2080,9 @@ func _show_enemy(e: bool) -> void:
 
 ## Enemy ship view: the opaque interior of box_hostiles2.png (the frame is drawn under it).
 const ENEMY_VIEW := Rect2(882, 54, 380, 529)
+## Stencil of the enemy view (CombatControl::DrawHostileBox), drawn at HudLayout.ENEMY_FRAME.position: opaque
+## frame px x 14..389, y 29..532 (screen 886..1261 × 74..577) with cut corners — narrower than ENEMY_VIEW.
+const ENEMY_MASK := "img/combatUI/box_hostiles_mask.png"
 ## Debug "one at a time" view: the shown ship fitted between the top and bottom HUD rows.
 const SINGLE_VIEW := Rect2(110, 150, 1170, 440)
 
@@ -2424,6 +2449,8 @@ func _armament_vertical() -> Array:
 func _touch_layout() -> void:
 	if enemy_space == null or single_view or weapon_panel == null or crew_control == null or systems_bar == null:
 		return
+	if screen_shake != null:
+		screen_shake.restore()  # lay out the unshaken HUD (the shake resumes on the new positions)
 	_touch_sig = _touch_signature()
 	_touch_hud_refresh()
 	# Layout switch (option changed in combat, fold / unfold): nothing carries over from the previous layout — pan
@@ -3650,6 +3677,9 @@ func _apply_view() -> void:
 		player_space.position = Vector2.ZERO
 		player_space.size = HudLayout.FRAME
 		player_space.set_fixed_origin(player_origin())
+		# Vanilla stencil: the enemy ship (bubble included) only shows inside box_hostiles_mask.png (Space.CLIP_SHADER).
+		enemy_space.set_clip_mask(FtlData.texture(ENEMY_MASK),
+			Rect2(ENEMY_VIEW.position - HudLayout.ENEMY_FRAME.position, ENEMY_VIEW.size))
 		if input_mode == InputProfile.TOUCH:
 			_touch_layout()
 			return
@@ -3659,6 +3689,7 @@ func _apply_view() -> void:
 		return
 	player_space.visible = not showing_enemy or not enemy_shown
 	enemy_space.visible = showing_enemy and enemy_shown
+	enemy_space.set_clip_mask(null)
 	for sp in [player_space, enemy_space]:
 		sp.position = SINGLE_VIEW.position
 		sp.size = SINGLE_VIEW.size
@@ -3758,6 +3789,7 @@ func _player_crew_left() -> bool:
 #   [--cloak=me|enemy[@S]] [--battery=me|enemy[@S]] (switch on: at once, or S seconds after start)
 #   [--teleport=send:ROOM[@S]] [--teleport=return:ROOM[@S]] (player teleporter; default S = 2)
 #   [--drones=PRESET] [--player-drones=NAME,NAME] [--enemy-drones=NAME,NAME] (scenario; DRONE_PRESETS)
+#   [--enemy-super=N] [--player-super=N] (Zoltan super shield of N points, PowerSuperShields)
 #   [--drone-parts=N] [--deploy=SLOT[,SLOT][@S]] (click the player's drone boxes, 1-based)
 #   Pointer simulation (rules/crew_controls.md; real mouse motion is then ignored), applied at 0.2 s:
 #   [--hover-crew=I] (pointer on crew-list entry I's sprite, 0-based)  [--hover-room=me|enemy:ROOM]
@@ -3884,6 +3916,11 @@ func _handle_cli() -> void:
 			showing_enemy = true
 		elif a.begins_with("--enemy-shields="):
 			_set_enemy_shields(int(a.trim_prefix("--enemy-shields=")))
+		elif a.begins_with("--enemy-super=") or a.begins_with("--player-super="):
+			# test: a Zoltan super shield of N points (PowerSuperShields(N); 0 removes it)
+			var sp := enemy_space if a.begins_with("--enemy-super=") else player_space
+			SuperShieldRule.power(sp.ship, int(a.get_slice("=", 1)))
+			sp.view.queue_redraw()
 		elif a.begins_with("--sensors="):
 			_set_sensors(int(a.trim_prefix("--sensors=")))
 		elif a.begins_with("--ion=") or a.begins_with("--damage="):

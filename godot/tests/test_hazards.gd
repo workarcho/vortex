@@ -184,6 +184,7 @@ func _run() -> void:
 	check("no engine power → no charge", k.ftl_charge, 0.0)
 
 	_test_hazard_sounds()
+	_test_stacking()
 
 
 ## rules/hazards.md §7b: every hazard sound name resolves in sounds.xml (environWarning's closing tag has a space),
@@ -256,3 +257,90 @@ func _test_hazard_sounds() -> void:
 	FtlData.record_plays = false
 	FtlData.play_log.clear()
 	FtlData.muted = was_muted
+
+
+## rules/hazards.md §0b (SpaceManager flags, WorldManager::ModifyEnvironment, SpaceManager::OnLoop /
+## DangerousEnvironment, SpaceStatus::OnLoop): environments stack; asteroids run beside anything; an ASB suspends
+## the sun / pulsar block and drives the shared flash timer; sun + pulsar = the pulsar's damage, the sun's sound;
+## an enemy-only ASB makes even a sun beacon safe; ONE HUD icon by priority; a choice outcome adds its environment.
+func _test_stacking() -> void:
+	print("environment stacking")
+	var E := HazardRule.Env
+	var a := ShipState.new("PLAYER_SHIP_HARD", true)
+	# Sun + asteroids: both run; the HUD shows the asteroids, the flare warning is left alone.
+	var h := HazardRule.create(E.SUN, 2, 5, 2)
+	h.add_environment(E.ASTEROIDS, 2, 2)
+	check("sun + asteroids: both flags", [h.has_env(E.SUN), h.has_env(E.ASTEROIDS), h.env], [true, true, E.SUN])
+	check("  HUD icon: asteroids first", h.hud_effects(), [1, 0])
+	h.timer = h.goal - 2.0
+	check("  no flare warning while asteroids run (SpaceStatus returns early)", h.warning(), "")
+	h.tick(2.5, [a])
+	check("  the flare still happens", h.flares, 1)
+	check("  the asteroid generator runs too (first asteroid at once)", h.ast_targets.size() >= 1, true)
+	# ASB + sun: UpdatePDS runs instead of the sun block (no flare), period [20, 25), HUD = ASB, text = solar flare.
+	var p := HazardRule.create(E.SUN, 2, 6, 2)
+	p.add_environment(E.PDS, 0, 2)
+	check("ASB + sun: flash period of the ASB", p.goal >= 20.0 and p.goal < 25.0, true)
+	check("  HUD icon: ASB", p.hud_effects(), [6, 0])
+	p.timer = p.goal - 3.0
+	check("  warning text: the sun's (sun branch first)", p.warning(), "warning_solar_flare")
+	var b := ShipState.new("PLAYER_SHIP_HARD", true)
+	for i in 300:
+		p.tick(0.1, [b])
+	check("  no solar flare while the ASB is up", [p.flares > 0, b.fires.is_empty()], [true, true])
+	check("  the flares counted are ASB volleys (sun damage never ran)", _log_count(p, "sun"), 0)
+	# Enemy-only ASB: the beacon is safe whatever else is there; once the enemy is gone the sun resumes.
+	var q := HazardRule.create(E.SUN, 2, 7, 2)
+	q.add_environment(E.PDS, 1, 2)
+	check("enemy-only ASB + sun: not dangerous (DangerousEnvironment)", q.is_dangerous(), false)
+	check("  HUD icon 9 (allies)", q.hud_effects(), [9, 0])
+	q.tick(0.1, [a, null])
+	check("  no enemy: battery off, sun dangerous again, sun icon", [q.has_env(E.PDS), q.is_dangerous(),
+		q.hud_effects()], [false, true, [2, 0]])
+	q.timer = q.goal - 0.05
+	q.tick(0.1, [a, null])
+	check("  sun flares resume on the shared timer", [q.flares, _log_count(q, "sun")], [1, 1])
+	# Sun + pulsar: the pulsar's damage, the sun's sound; period of the last one set.
+	var sp := HazardRule.create(E.SUN, 2, 8, 2)
+	sp.add_environment(E.PULSAR, 2, 2)
+	check("sun + pulsar: pulsar period [11, 18)", sp.goal >= 11.0 and sp.goal < 18.0, true)
+	check("  HUD icon: sun", sp.hud_effects(), [2, 0])
+	sp.timer = sp.goal - 0.05
+	sp.tick(0.1, [ShipState.new("PLAYER_SHIP_HARD", true)])
+	check("  damage = pulsar", [_log_count(sp, "pulsar"),
+		_log_count(sp, "sun")], [1, 0])
+	# Storm sets the nebula; the nebula icon only when nothing else is there.
+	var st := HazardRule.create(E.ASTEROIDS, 2, 9, 2)
+	st.add_environment(E.STORM, 2, 2)
+	check("asteroids + storm: nebula flag, asteroid icon", [st.has_env(E.NEBULA), st.hud_effects()], [true, [1, 0]])
+	check("  backdrop: the storm clouds", st.visual_env(), E.STORM)
+	var ns := ShipState.new("PLAYER_SHIP_HARD", true)
+	st.apply_status(ns)
+	check("  storm status on the ship: reactor divide 2", ns.reactor_divide, 2)
+	check("nebula + storm icons", HazardRule.create(E.STORM, 2, 1, 2).hud_effects(), [3, 4])
+	# A choice outcome adds its environment to the beacon's (UpdateLocation -> ModifyEnvironment).
+	var r := RunState.new_run(31)
+	r.hazard = HazardRule.create(E.SUN, 2, 4, 2)
+	r.env = E.SUN
+	var ev := r.engine.new_event("STACK_TEST")
+	ev.text = "asteroids"
+	ev.content = true
+	ev.environment = E.ASTEROIDS
+	r.show_event(ev)
+	check("outcome with asteroids at a sun beacon: both", [r.hazard.has_env(E.SUN), r.hazard.has_env(E.ASTEROIDS),
+		r.env], [true, true, E.SUN])
+	var ev2 := r.engine.new_event("STACK_TEST2")
+	ev2.text = "pds"
+	ev2.content = true
+	ev2.environment = E.PDS
+	ev2.env_target = 0
+	r.hazard.timer = 5.0
+	r.show_event(ev2)
+	check("  then an ASB outcome: PDS added, shared timer restarted", [r.hazard.has_env(E.PDS), r.hazard.timer],
+		[true, 0.0])
+	r.hazard = null
+
+
+func _log_count(h: HazardRule, prefix: String) -> int:
+	return h.log.filter(func(l): return String(l).begins_with(prefix)).size()
+

@@ -67,6 +67,7 @@ var space_rng := RandomNumberGenerator.new()
 var space_back := ""  # SpaceManager::currentBack (path): the next pick must differ from it
 var space_planet := ""  # SpaceManager::currentPlanet (path, "" = none)
 var env := -1
+var _arrival_env_done := false  # show_event of the arrival event: its environment was set by _arrive
 var over := ""  # "" running, "gameover", "victory"
 var frozen_settings := {}  # Settings.freeze_run() snapshot taken when the run started (gameplay settings)
 var over_text := ""
@@ -256,6 +257,8 @@ func apply(intent: Dictionary) -> bool:
 	var arg := int(intent.get("arg", -1))
 	if over != "":
 		return false
+	if LastStand.waiting(self) and String(intent.type) in LastStand.WAIT_BLOCKED:
+		return false  # boss-level WAIT animation running (StarMap waiting: map input ignored)
 	match String(intent.type):
 		RunIntent.OPEN_MAP:
 			if not can_open_map() or leave_crew_open:
@@ -506,7 +509,8 @@ func _clear_location(waited := false) -> void:
 		ship.last_jump_ready = false
 	ship.reactor_divide = 1
 	var sens := ship.sys("sensors")
-	if sens and env in [HazardRule.Env.NEBULA, HazardRule.Env.STORM]:
+	if sens and (env in [HazardRule.Env.NEBULA, HazardRule.Env.STORM] \
+			or (hazard != null and hazard.has_env(HazardRule.Env.NEBULA))):  # also a nebula added by an outcome
 		ship.set_power_loss("sensors", 0)
 	ship._check_reactor()
 	DroneSystemRule.jump(ship)
@@ -576,7 +580,9 @@ func _arrive(count_visit: bool) -> void:
 	if hazard != null and hazard.env == HazardRule.Env.PDS:
 		hazard.pds_origin = HazardRule.pds_origin_for(space)  # the ASB gun: planet, or the fleet's gun ship
 	Hooks.emit(&"beacon_arrived", self, current_beacon)
+	_arrival_env_done = true  # CreateLocation called ModifyEnvironment once (above); UpdateLocation is for later events
 	show_event(ev)
+	_arrival_env_done = false
 	if b.event.get("store", false) or ev.get("store", false):
 		_open_store_later()
 	_update_ftl_safe()
@@ -821,23 +827,30 @@ func show_event(ev: Dictionary) -> void:
 		return
 	dialog = ev
 	clone_text = ""
-	# UpdateLocation -> ModifyEnvironment(event.environment): a choice outcome can start a hazard at this beacon
-	# (e.g. BOARDERS_ASTEROID_GHOST, ZOLTAN_DISTRESS_MANTIS: asteroids). The arrival event's own environment was set
-	# by _arrive. Vanilla adds to the space's flags; one hazard per beacon here, so only when there is none yet.
-	if hazard == null and int(ev.get("environment", -1)) >= 0:
-		env = int(ev.environment)
+	# UpdateLocation -> ModifyEnvironment(event.environment): a later event / choice outcome ADDS its environment to
+	# the beacon's (rules/hazards.md §0b; e.g. BOARDERS_ASTEROID_GHOST, ZOLTAN_DISTRESS_MANTIS: asteroids; REBEL_PDS
+	# hacked: SetPlanetaryDefense again with target all / enemy). The arrival event's own was set by _arrive.
+	var ev_env := int(ev.get("environment", -1))
+	if _arrival_env_done:
+		_arrival_env_done = false
+	elif ev_env >= 0:
 		var shs := ship.sys("shields")
-		hazard = HazardRule.create(env, int(ev.get("env_target", 2)), int(rng.randi() & 0x7fffffff),
-			shs.get_level() if shs else 0)
-		hazard.apply_status(ship)
-		if map != null and current_beacon >= 0 and current_beacon < map.beacons.size():
-			map.beacons[current_beacon].env = env
-		if env == HazardRule.Env.PDS:
+		var fresh := hazard == null
+		if fresh:
+			env = ev_env
+			hazard = HazardRule.create(ev_env, int(ev.get("env_target", 2)), int(rng.randi() & 0x7fffffff),
+				shs.get_level() if shs else 0)
+			if map != null and current_beacon >= 0 and current_beacon < map.beacons.size():
+				map.beacons[current_beacon].env = env
+		else:
+			hazard.add_environment(ev_env, int(ev.get("env_target", 2)), shs.get_level() if shs else 0)
+		if ev_env in [HazardRule.Env.NEBULA, HazardRule.Env.STORM]:
+			hazard.apply_status(ship)  # the event's nebula / storm status effects (CheckStatusEffects); a ship built
+			# later gets them in build_enemy_ship
+		elif fresh:
+			hazard.apply_status(ship)
+		if ev_env == HazardRule.Env.PDS:
 			hazard.pds_origin = HazardRule.pds_origin_for(space)
-	elif hazard != null and hazard.env == HazardRule.Env.PDS and int(ev.get("environment", -1)) == HazardRule.Env.PDS \
-			and int(ev.get("env_target", 2)) != hazard.target:
-		# SetPlanetaryDefense again with the outcome's target (REBEL_PDS / REBEL_AUTO_PDS hacked: all / enemy).
-		hazard.set_planetary_defense(int(ev.get("env_target", 2)))
 	dialog_rewards = apply_effects(ev)
 	if not ev.ship.is_empty():
 		if ev.ship.get("hostile_only", false):
@@ -1328,7 +1341,9 @@ func install_system(id: String) -> bool:
 ## PossibleDamage: hull always (negative = repair), then the system's room: system damage + fire / breach.
 func _damage(d: Dictionary) -> void:
 	var amount := int(d.amount)
+	var before := ship.hull
 	ship.hull = clampi(ship.hull - amount, 0, ship.max_hull)
+	ship.last_damage = before - ship.hull  # ShipManager::DamageHull: iLastDamage = the clamped change (screen shake)
 	var sys_id := String(d.system)
 	var room := -1
 	if sys_id == "random":

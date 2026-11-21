@@ -213,15 +213,18 @@ func _achievement_tooltip(m: Vector2) -> void:
 		queue_redraw()
 
 
-## [title, body] of an achievement tooltip (rule `tooltip.achievement`; AchievementTracker::SetTooltip).
-static func achievement_text(id: String, ship: ShipState) -> Array:
-	var r: Variant = Hooks.rule(&"tooltip.achievement", func(aid: String, sh: ShipState) -> Array:
+## [title, body] of an achievement tooltip (rule `tooltip.achievement` (id, ship, blueprint);
+## AchievementTracker::SetTooltip). The ship class of the victory / quest marker texts comes from `ship` (the
+## hangar's ship) or, without one, from the blueprint name `bp` (the other screens).
+static func achievement_text(id: String, ship: ShipState, bp := "") -> Array:
+	var r: Variant = Hooks.rule(&"tooltip.achievement", func(aid: String, sh: ShipState, b: String) -> Array:
+		var bp_name := String(sh.blueprint.get("name", "")) if sh else b
 		var cls := ""
-		if sh:
+		if bp_name != "":
 			var m := RegEx.create_from_string("<class\\s+id=\"([^\"]+)\"").search(
-				FtlData.ship_blueprint_text(String(sh.blueprint.get("name", ""))))
+				FtlData.ship_blueprint_text(bp_name))
 			cls = FtlData.tr_id(m.get_string(1)) if m else ""
-		return achievement_tooltip_text(aid, cls), id, ship)
+		return achievement_tooltip_text(aid, cls), id, ship, bp)
 	return r
 
 

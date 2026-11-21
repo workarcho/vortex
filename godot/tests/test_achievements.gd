@@ -40,6 +40,9 @@ func _run() -> void:
 	_popups()
 	_tooltip_text()
 	await _hangar_hover()
+	_ship_list_hover()
+	_stats_hover()
+	_pause_hover()
 	SaveGame.path = old[0]
 	SaveGame.persist = old[1]
 	PlayerProfile.path = old[2]
@@ -410,3 +413,102 @@ func _hangar_hover() -> void:
 	check("nothing hovered", [hv.ach_hover, TooltipService.text], [-1, ""])
 	TooltipService.manual = false
 	hv.queue_free()
+
+
+## The ship list (ShipSelect::MouseMove): the mini achievements of ship-unlocked buttons answer with the
+## achievement tooltip, ship-locked ones not at all; an unlock arrow shows its instant unlock text.
+func _ship_list_hover() -> void:
+	print("Ship list hover")
+	var p := _fresh()
+	p.unlocked["4:0"] = true  # Fed A
+	p.set_achievement(String(PlayerProfile.ship_achievement_ids(4)[0]), 1)
+	var ts := TitleState.new()
+	ts.unlock_all = false
+	var l := ShipListView.new()
+	add_child(l)
+	l.setup(ts)
+	l.open(0, 0)
+	TooltipService.manual = true
+	var fed: Dictionary = l.buttons["ship4"]
+	var rects: Array = l.mini_rects(fed)
+	check("mini icons at button + (6, 123), 37 apart", [rects[0].position, rects[1].position.x - rects[0].position.x],
+		[fed.rect.position + Vector2(6, 123), 37.0])
+	TooltipService.begin_frame(0.0, Vector2(-100, -100))
+	l.hover_tooltips(rects[0].get_center())
+	var aid := String(MenuDraw.ship_achievements(4)[0].id)
+	check("Fed mini 1: achievement tooltip", [TooltipService.title, TooltipService.forced, l.ach_hover],
+		[TooltipText.t(aid + "_name"), true, Vector2i(4, 0)])
+	TooltipService.begin_frame(0.0, Vector2(-100, -100))
+	l.hover_tooltips(rects[3].get_center())
+	check("Fed victory marker", TooltipService.title, TooltipText.f("victory_ach_title",
+		TitleState.ship_class("PLAYER_SHIP_FED")))
+	TooltipService.begin_frame(0.0, Vector2(-100, -100))
+	var engi: Dictionary = l.buttons["ship3"]  # Engi A locked: no lower box, no tooltips
+	l.hover_tooltips(engi.rect.position + Vector2(20, 139))
+	check("ship-locked button: no achievement tooltip", [TooltipService.text, l.ach_hover], ["", Vector2i(-1, -1)])
+	TooltipService.begin_frame(0.0, Vector2(-100, -100))
+	var arrow: Dictionary = l.arrows()[0]  # Kestrel -> Engi (Engi locked): sector 5
+	l.hover_tooltips(arrow.rect.get_center())
+	check("arrow tooltip (instant, no title)", [TooltipService.text, TooltipService.title, TooltipService.forced,
+		l.arrow_hover], [ShipListView.arrow_text(arrow), "", true, 0])
+	TooltipService.manual = false
+	l.queue_free()
+
+
+## The stats screen (ScoreKeeper::MouseMove): ACHIEVEMENTS page icons and the SHIP BEST page's three icons.
+func _stats_hover() -> void:
+	print("Stats screen hover")
+	var p := _fresh()
+	p.set_achievement("ACH_SECTOR_5", 1)
+	var ts := TitleState.new()
+	var sv := StatsView.new()
+	add_child(sv)
+	sv.setup(ts)
+	sv.left = 1
+	sv.right = 1
+	sv.open()
+	TooltipService.manual = true
+	TooltipService.begin_frame(0.0, Vector2(-100, -100))
+	sv.hover_tooltips(StatsView.ACH_AT + Vector2(32, 32))
+	check("ACHIEVEMENTS icon 0 = sector 5 (+ difficulty line)", [TooltipService.title, TooltipService.text,
+		sv.ach_hover], [TooltipText.t("ACH_SECTOR_5_name"), TooltipText.t("ACH_SECTOR_5_desc") + " \n\n"
+		+ TooltipText.t("ach_normal"), 0])
+	TooltipService.begin_frame(0.0, Vector2(-100, -100))
+	sv.hover_tooltips(StatsView.ACH_AT + Vector2(70 * 2 + 32, 170 + 32))
+	check("row 2 icon 3", [TooltipService.title, sv.ach_hover], [TooltipText.t("ACH_NO_REPAIR_name"), 9])
+	TooltipService.begin_frame(0.0, Vector2(-100, -100))
+	sv.hover_tooltips(Vector2(410 + 70 + 32, 118 + 32))
+	check("SHIP BEST icon 2", [TooltipService.title, sv.ship_ach_hover],
+		[TooltipText.t(String(MenuDraw.ship_achievements(0)[1].id) + "_name"), 1])
+	TooltipService.begin_frame(0.0, Vector2(-100, -100))
+	sv.hover_tooltips(Vector2(410 + 64, 118 + 32))  # the 6 px gap between icons
+	check("gap: nothing", [TooltipService.text, sv.ach_hover, sv.ship_ach_hover], ["", -1, -1])
+	TooltipService.manual = false
+	sv.queue_free()
+
+
+## The Esc menu (MenuScreen::MouseMove): the current ship's icons and markers; nothing while the confirm is open.
+func _pause_hover() -> void:
+	print("Pause menu hover")
+	var p := _fresh()
+	p.set_ship_victory(4, 1, 0)
+	var pm := PauseMenuView.new()
+	add_child(pm)
+	pm.open(1, true, "PLAYER_SHIP_FED_2")
+	var achs := MenuDraw.ship_achievements(4)
+	var rects: Array = pm.achievement_rects(achs)
+	check("Fed: 3 icons + victory + quest, markers 32 px", [rects.size(), rects[3].size, rects[4].position.y,
+		rects[3].position.y - rects[4].position.y], [5, Vector2(32, 32), PauseMenuView.ACH_AT.y, 34.0])
+	TooltipService.manual = true
+	TooltipService.begin_frame(0.0, Vector2(-100, -100))
+	pm.hover_tooltips(rects[3].get_center())
+	var cls := TitleState.ship_class("PLAYER_SHIP_FED_2")
+	check("victory marker: achieved with type B", [TooltipService.title, TooltipService.text, pm.ach_hover],
+		[TooltipText.f("victory_ach_title", cls), TooltipText.f("victory_ach", cls) + " \n\n"
+		+ TooltipText.f("achieved_with", TooltipText.t("type_b"), TooltipText.t("easy")), 3])
+	pm.click(pm.buttons["hangar"].rect.get_center())  # opens the end-game confirm
+	TooltipService.begin_frame(0.0, Vector2(-100, -100))
+	pm.hover_tooltips(rects[0].get_center())
+	check("confirm open: no achievement hover", [TooltipService.text, pm.ach_hover], ["", -1])
+	TooltipService.manual = false
+	pm.queue_free()

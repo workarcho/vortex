@@ -33,6 +33,7 @@ func _run() -> void:
 	test_neutral_and_spawn()
 	test_drone_and_flagship()
 	test_blocks()
+	test_bubble_geometry()
 
 
 func zoltan() -> ShipState:
@@ -178,3 +179,46 @@ func test_blocks() -> void:
 	check("bypass: teleporter allowed", TeleporterRule.super_blocked(me, z), false)
 	check("bypass: bombs ignore it", AugmentRule.bypasses_super(me), true)
 	check("enemy AI teleporter is not blocked", TeleporterRule.super_blocked(z, me), false)
+
+
+## Shield ellipse / bubble placement (rules/ship_rendering.md §9, hud_layout.md "Enemy ship"): Ship::Import reads
+## ELLIPSE a b cx cy; Ship::GetBaseEllipse = (cx, cy) + ShipGraph centre (integer centre of the rooms' box), +110 y
+## on enemy ships; Shields::RenderBase draws the enemy image at 2a × 2b, the player image at its own size, the super
+## shield with the same rectangle; the TARGET view is stencilled by box_hostiles_mask.png.
+func test_bubble_geometry() -> void:
+	print("Shield bubble geometry (enemy / player, super shield) and the TARGET stencil")
+	var rig := ShipState.new("REBEL_FAT", false)  # rebel_squat: ELLIPSE 200 225 0 -130
+	var b := rig.rooms_bounds()
+	var gc := Vector2(floorf(b.position.x + b.size.x / 2.0), floorf(b.position.y + b.size.y / 2.0))
+	check("rigger axes (a, b)", rig.shield_axes, Vector2(200, 225))
+	check("rigger centre = rooms centre + (0, -130) + (0, 110)", rig.shield_center, gc + Vector2(0, -20))
+	var r := ShipView.bubble_rect(rig, Vector2(340, 410))
+	check("enemy bubble = 2a x 2b about the centre", r, Rect2(rig.shield_center - Vector2(200, 225), Vector2(400, 450)))
+	SuperShieldRule.power(rig, 5)
+	check("super shield uses the same rectangle", ShipView.bubble_rect(rig, Vector2(340, 410)), r)
+	var k := ShipState.new("PLAYER_SHIP_HARD", true)  # kestral: ELLIPSE 350 220 -30 0, no +110
+	var kb := k.rooms_bounds()
+	var kc := Vector2(floorf(kb.position.x + kb.size.x / 2.0), floorf(kb.position.y + kb.size.y / 2.0))
+	check("player centre: no enemy offset", k.shield_center, kc + Vector2(-30, 0))
+	check("player bubble = image size about the centre", ShipView.bubble_rect(k, Vector2(700, 440)),
+		Rect2(k.shield_center - Vector2(350, 220), Vector2(700, 440)))
+	var jp := ShipState.new("JELLY_BUTTON_P_DLC", false)  # dlcPirateBlueprints.xml "Pirate Scout": 170 205 0 -50
+	check("pirate blueprint loaded, ellipse", [jp.shield_axes, jp.layout.get("vertical", 0)], [Vector2(170, 205), 55])
+	print("TARGET stencil (CombatControl::DrawHostileBox)")
+	var img := FtlData.texture("img/combatUI/box_hostiles_mask.png").get_image()
+	check("mask opaque box (14, 29)..(389, 532)", img.get_used_rect(), Rect2i(14, 29, 376, 504))
+	check("header band not in the stencil (frame y 28 / 29)",
+		[img.get_pixel(200, 28).a > 0.5, img.get_pixel(200, 29).a > 0.5], [false, true])
+	var sp := Space.new()
+	var mask := FtlData.texture("img/combatUI/box_hostiles_mask.png")
+	sp.set_clip_mask(mask, Rect2(10, 9, 380, 529))
+	var mat := sp.material as ShaderMaterial
+	check("clip material: mask + container rect in mask px", [mat != null,
+		mat.get_shader_parameter("mask_rect") if mat else null], [true, Vector4(10, 9, 380, 529)])
+	sp.set_clip_mask(null)
+	check("no mask: plain premultiplied compositing", (sp.material as CanvasItemMaterial).blend_mode,
+		CanvasItemMaterial.BLEND_MODE_PREMULT_ALPHA)
+	sp.free()
+	print("Unknown weapon names (BlueprintManager::GetWeaponBlueprint default blueprint)")
+	check("BOMB_BREACH (WEAPONS_JELLY) unknown, BOMB_BREACH_1 known",
+		[FtlData.has_weapon_blueprint("BOMB_BREACH"), FtlData.has_weapon_blueprint("BOMB_BREACH_1")], [false, true])

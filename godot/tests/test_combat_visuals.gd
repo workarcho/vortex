@@ -69,6 +69,8 @@ func _run() -> void:
 	w.damage_over_time(25.0)
 	check("fire and sabotage share it", SystemPowerColumn.partial_damage(k, w), 0.5)
 	_test_hud_boxes()
+	_test_screen_shake()
+	_test_artillery_art()
 	var en := k.sys("engines")
 	k.set_power_loss("engines", 1)
 	check("event-lost bar", en.bar_state(en.get_level() - 1), "lost")
@@ -299,3 +301,121 @@ func _test_hud_boxes() -> void:
 		check("  with the dim pass's stencil it is hidden", both.get_pixelv(top_px).a, 0.0)
 		check("  bright part starts at y 704 - 9 free at x 52 (vanilla: 686 with 2 free)",
 			[both.get_pixel(19, 695 - 397).a > 0.0, both.get_pixel(19, 694 - 397).a > 0.0], [true, false])
+
+
+## rules/hud_layout.md "Screen shake" (CommandGui::OnLoop / UpdateShake, SpaceManager::GetScreenShake): timer =
+## min(hull damage / 5, 1) s (set, not added; a repair stops it), an ASB shot clamps it to [0.05, 1]; offsets are
+## whole-pixel targets in −3..2 reached in 5 frames, back to (0, 0) in 10 frames; targets move by the offset and
+## end exactly where they were (a layout write while shaking becomes the new base).
+func _test_screen_shake() -> void:
+	print("screen shake")
+	var sk := ScreenShake.new()
+	sk.on_hull_damage(3)
+	check("3 hull damage -> 0.6 s", snappedf(sk.timer, 0.001), 0.6)
+	sk.on_hull_damage(10)
+	check("10 hull damage -> capped at 1 s", sk.timer, 1.0)
+	sk.on_hull_damage(1)
+	check("a later 1 damage SETS 0.2 s", snappedf(sk.timer, 0.001), 0.2)
+	sk.on_hull_damage(0)
+	check("0 damage: unchanged", snappedf(sk.timer, 0.001), 0.2)
+	sk.on_hull_damage(-2)
+	check("repair (DamageHull < 0): negative timer, shake over", sk.timer < 0.0, true)
+	sk.timer = 0.0
+	sk.on_pds_shot()
+	check("ASB shot from 0 -> 0.05 s", snappedf(sk.timer, 0.001), 0.05)
+	sk.timer = 0.5
+	sk.on_pds_shot()
+	check("ASB shot keeps 0.5 s", sk.timer, 0.5)
+	# Motion: seeded, 0.5 s of shake then back to rest.
+	sk.rng.seed = 12
+	sk.timer = 0.5
+	sk.step()
+	var d0 := sk.desired
+	var ok_range := d0.x >= -3 and d0.x <= 2 and d0.y >= -3 and d0.y <= 2 and d0 == d0.round()
+	check("first target: whole pixels in -3..2", ok_range, true)
+	check("moves 1/5 of the way per frame", sk.current.is_equal_approx(d0 / 5.0), true)
+	var reached := false
+	for i in 4:
+		sk.step()
+		reached = reached or sk.current.round() == d0
+	check("target reached (rounded) within 5 frames, then a new one is picked", reached, true)
+	var seen_range := true
+	var frames := 0
+	while sk.active() and frames < 200:
+		sk.step()
+		frames += 1
+		var c := sk.current
+		if c.x < -3.0 or c.x > 2.0 or c.y < -3.0 or c.y > 2.0:
+			seen_range = false
+	check("offsets stay within -3..2", seen_range, true)
+	check("settles back at (0, 0) after the timer (~0.5 s + 10 frames)", [sk.current, frames > 20 and frames < 60],
+		[Vector2.ZERO, true])
+	# Applying to nodes: offset added, layout writes respected, exact base at the end.
+	var holder := Node2D.new()
+	add_child(holder)
+	var box := Control.new()
+	box.position = Vector2(100, 50)
+	holder.add_child(box)
+	var n2 := Node2D.new()
+	n2.position = Vector2(7, 9)
+	holder.add_child(n2)
+	sk.targets = func() -> Array: return [box, n2]
+	sk.timer = 0.3
+	sk.current = Vector2(2, -1)
+	sk.apply()
+	check("targets moved by the offset", [box.position, n2.position], [Vector2(102, 49), Vector2(9, 8)])
+	box.position = Vector2(300, 60)  # a layout pass while shaking
+	sk.current = Vector2(-3, 1)
+	sk.apply()
+	check("layout write = new base", box.position, Vector2(297, 61))
+	sk.restore()
+	check("restore(): unshaken positions", [box.position, n2.position], [Vector2(300, 60), Vector2(7, 9)])
+	sk.current = Vector2(1, 1)
+	sk.apply()
+	sk.current = Vector2.ZERO
+	sk.desired = Vector2.ZERO
+	sk.timer = 0.0
+	sk.apply()
+	check("shake over: exact base again", [box.position, n2.position], [Vector2(300, 60), Vector2(7, 9)])
+	# Sources through _process: the player's hull damage and the ASB's queueScreenShake.
+	var me := ShipState.new("PLAYER_SHIP_HARD", true)
+	var hz := HazardRule.create(HazardRule.Env.PDS, 0, 3, 2)
+	sk.setup(me, sk.targets, func() -> HazardRule: return hz)
+	me.take_hull_damage(4)
+	check("take_hull_damage records iLastDamage", me.last_damage, 4)
+	sk._process(0.0)
+	check("player hull damage 4 -> timer 0.8, damage consumed", [snappedf(sk.timer, 0.001), me.last_damage], [0.8, 0])
+	sk.timer = 0.0
+	var en := ShipState.new("REBEL_FAT", false)
+	for i in 80:
+		hz.tick(0.1, [me, en])
+	check("an ASB shot queues the shake (UpdatePDS)", hz.pds_shots > 0 and hz.screen_shake_queued, true)
+	sk._process(0.0)
+	check("  read once: timer >= 0.05, flag cleared", [sk.timer >= 0.05, hz.screen_shake_queued], [true, false])
+	holder.queue_free()
+	sk.free()
+
+
+## rules/artillery.md "Art": ShipManager::RenderWeapons pads the weapons to 4 and appends the artillery weapons,
+## so artillery n sits on mount max(weapons, 4) + n and is drawn with its own weapon art (flagship: boss_1..4 on
+## mounts 4-7; FED cruiser: artillery_fed = weapons/blank.png on mount 4, the cannon being part of the hull image).
+func _test_artillery_art() -> void:
+	print("artillery art")
+	var boss := ShipState.new("BOSS_1", false)
+	check("flagship artillery on mounts 4-7", boss.artillery.map(func(w): return w.mount_index), [4, 5, 6, 7])
+	check("  mounts exist in the layout", boss.mounts.size() >= 8, true)
+	check("  art = boss_1..4 strips", boss.artillery.map(func(w): return String(w.bp.get("weapon_art", ""))),
+		["boss_1", "boss_2", "boss_3", "boss_4"])
+	var fed := ShipState.new("PLAYER_SHIP_FED", true)
+	check("FED artillery on mount 4 (649, 200)", [fed.artillery[0].mount_index, fed.mounts[4].pos],
+		[4, Vector2(649, 200)])
+	var sp := Space.new()
+	add_child(sp)
+	sp.setup(boss)
+	var w: WeaponState = boss.artillery[0]
+	check("the ship view slides / draws the artillery weapons too", sp.view.weapon_slide.has(w), true)
+	w.powered = true
+	w.charge = w.max_charge(0)
+	check("charged artillery shows its charged frame", WeaponArt.frame_index(w, 0), int(w.anim.charged_frame))
+	sp.queue_free()
+

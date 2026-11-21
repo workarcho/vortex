@@ -57,7 +57,7 @@ func _process(d: float) -> void:
 	if not visible:
 		return
 	var w := _hz().warning()
-	if w != "" and _hz().env in [HazardRule.Env.SUN, HazardRule.Env.PULSAR, HazardRule.Env.PDS]:
+	if w != "":  # sun / pulsar / ASB only (HazardRule.warning)
 		warning.text_id = w
 		if not warning.running():
 			FtlData.play("environWarning")  # SpaceStatus warningMessage SetSound: played by WarningMessage::Start
@@ -110,7 +110,7 @@ func _draw() -> void:
 	if a > 0.0:
 		# CommandGui::RenderStatic: flareImage (stars/planet_sun_flare.png, 500x500 primitive) at (-360, -640) scaled
 		# x4, colour (248,129,33) (sun) / COLOR_BLUE_ION (133,231,237) (pulsar), alpha = GetFlashOpacity (a^3).
-		var c := Color8(248, 129, 33) if h.env == HazardRule.Env.SUN else Color8(133, 231, 237)
+		var c := Color8(133, 231, 237) if h.has_env(HazardRule.Env.PULSAR) else Color8(248, 129, 33)  # pulsarLevel
 		var flare := HudDraw.tex("stars/planet_sun_flare.png")
 		if flare:
 			draw_texture_rect(flare, FLARE_RECT, false, Color(c, a))

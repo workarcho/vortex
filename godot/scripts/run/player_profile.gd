@@ -81,8 +81,30 @@ func _defaults() -> void:
 ## The profile of this process (loaded on first use).
 static func current() -> PlayerProfile:
 	if _current == null:
-		_current = load_file()
+		_current = demo() if OS.get_cmdline_user_args().has("--demo-profile") else load_file()
 	return _current
+
+
+## CLI `--demo-profile` (screenshots; never read from / written to disk): a fixed profile like the one of
+## screenshot 39 — every layout A but the Rock and the Crystal, layout B of the Kestrel / Engi / Stealth, some
+## ship achievements, victories (Engi A hard, Fed A normal + B easy, Mantis A easy), the Fed / Slug quests,
+## ACH_SECTOR_5 (fresh: "New!") and ACH_WIN_EASY.
+static func demo() -> PlayerProfile:
+	var p := PlayerProfile.new()
+	for id in [0, 1, 2, 3, 4, 5, 7, 9]:
+		p.unlocked["%d:0" % id] = true
+	for id in [0, 1, 3]:
+		p.unlocked["%d:1" % id] = true
+	for k in [[0, 0], [0, 1], [3, 2], [4, 0], [2, 1]]:
+		var ids := ship_achievement_ids(k[0])
+		if k[1] < ids.size():
+			p.achievements[ids[k[1]]] = 1
+	p.victories_by_ship = {3: {0: 2}, 4: {0: 1, 1: 0}, 2: {0: 0}}
+	p.quests = {4: true, 5: true}
+	p.achievements["ACH_SECTOR_5"] = 1
+	p.achievements["ACH_WIN_EASY"] = 2
+	p.fresh = {"ACH_SECTOR_5": true}
+	return p
 
 
 ## Tests: forget the in-memory profile (the next `current()` reads `path` again).
