@@ -300,13 +300,15 @@ func show_toast(t: String) -> void:
 
 
 ## Continue (finalChoice 9 → WorldManager::LoadGame): the saved run becomes RunState.current and main.tscn
-## resumes it. The save file stays (it is rewritten at the next save point).
+## resumes it. The save file is deleted once read, as vanilla (WorldManager::LoadGame); the next save point rewrites it.
 func continue_run() -> bool:
 	var d := SaveGame.read()
 	if d.is_empty():
 		show_toast(FtlData.tr_id("no_load"))
 		return false
 	var run := SaveGame.restore(d)
+	SaveGame.delete()  # WorldManager::LoadGame deletes the file once read; the next save point (or the app
+	# going to the background on Android) writes it again
 	started = true
 	Main.run_mode = true
 	Main.player_ship_name = String(run.ship.blueprint.get("name", "PLAYER_SHIP_HARD"))

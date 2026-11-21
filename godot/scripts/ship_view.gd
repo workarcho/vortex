@@ -740,8 +740,9 @@ func draw_room_highlight(room_id: int) -> void:
 	if room_id < 0:
 		return
 	var r := ship.room_rect(room_id)
-	draw_rect(r, Color8(255, 255, 0), false, 5)
-	draw_rect(r.grow(-5), Color8(255, 188, 0), false, 1)
+	# Outline primitives grow inward from the rect edge; Godot strokes are centred on it, hence the half insets.
+	draw_rect(r.grow(-2.5), Color8(255, 255, 0), false, 5)
+	draw_rect(r.grow(-5.5), Color8(255, 188, 0), false, 1)
 
 
 ## Top-left corner of tile `tile` (row-major) of a room.
