@@ -103,6 +103,13 @@ func _on_sector_entered(run: RunState, _level: int, desc_name: String) -> void:
 	start_playlist(MusicLogic.sector_tracks(desc))
 
 
+## Continue: the loaded run's sector playlist (vanilla LoadGame rebuilds the sector, which starts its music);
+## the battle stem then follows check_world as usual.
+func resume_run(run: RunState) -> void:
+	if run != null:
+		_on_sector_entered(run, 0, run.sector_desc)
+
+
 func _on_run_ended(_run: RunState, kind: String) -> void:
 	if kind == "victory":
 		victory_timer = VICTORY_TITLE_DELAY

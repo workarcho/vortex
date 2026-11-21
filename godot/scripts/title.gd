@@ -315,6 +315,7 @@ func continue_run() -> bool:
 	Main.run_setup = SaveGame.setup_of(d)
 	ShipAI.difficulty = int(run.engine.difficulty)
 	RunState.current = run
+	Music.resume_run(run)
 	FrameHost.change_scene(get_tree(), MAIN_SCENE)
 	return true
 
