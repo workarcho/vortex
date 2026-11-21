@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Project-owned test ships (not FTL data). Same shape as <shipBlueprint> in FTL's blueprints.xml,
+  read by FtlData.ship_blueprint() before the ftl-data blueprint files.
+
+  TEST_SHIP_ALL: Federation cruiser hull/layout (fed_cruiser, 18 rooms) with every system installed,
+  each in the room the FED blueprint itself assigns to it (incl. the optional ones and artillery).
+  Interior images are only the ones the FED blueprint gives for those rooms.
+  Clonebay and medbay are mutually exclusive (same room): TEST_SHIP_ALL_CLONE swaps them.
+  "power" = installed level (as in FTL blueprints).
+-->
+<FTL>
+
+<shipBlueprint name="TEST_SHIP_ALL" layout="fed_cruiser" img="fed_cruiser">
+	<systemList>
+		<shields power="4" room="11" start="true"/>
+		<engines power="4" room="3" start="true" img="room_engines_2"/>
+		<oxygen power="3" room="9" start="true" img="room_oxygen_4"/>
+		<weapons power="8" room="15" start="true"/>
+		<drones power="6" room="16" start="true" img="room_drones_5"/>
+		<medbay power="3" room="10" start="true"/>
+		<pilot power="3" room="4" start="true"/>
+		<sensors power="3" room="13" start="true">
+			<slot>
+				<direction>down</direction>
+				<number>1</number>
+			</slot>
+		</sensors>
+		<doors power="3" room="8" start="true" img="room_doors_5">
+			<slot>
+				<direction>right</direction>
+				<number>0</number>
+			</slot>
+		</doors>
+		<teleporter power="3" room="1" start="true"/>
+		<cloaking power="3" room="12" start="true" img="room_cloaking_8"/>
+		<artillery power="4" room="6" start="true" weapon="ARTILLERY_FED"/>
+		<battery power="2" room="14" start="true" img="room_battery_3"/>
+		<mind power="3" room="5" start="true" img="room_mind_7"/>
+		<hacking power="3" room="2" start="true" img="room_hacking_3">
+			<slot>
+				<direction>left</direction>
+				<number>0</number>
+			</slot>
+		</hacking>
+	</systemList>
+	<weaponSlots>4</weaponSlots>
+	<droneSlots>3</droneSlots>
+	<weaponList count="4" missiles="20">
+		<weapon name="LASER_BURST_3"/>
+		<weapon name="LASER_HEAVY_2"/>
+		<weapon name="ION_2"/>
+		<weapon name="MISSILES_2_PLAYER"/>
+	</weaponList>
+	<droneList drones="10"/>
+	<health amount="30"/>
+	<maxPower amount="25"/>
+	<crewCount amount="1" class="human"/>
+	<crewCount amount="1" class="engi"/>
+	<crewCount amount="1" class="mantis"/>
+	<crewCount amount="1" class="rock"/>
+	<crewCount amount="1" class="energy"/>
+	<crewCount amount="1" class="slug"/>
+</shipBlueprint>
+
+<shipBlueprint name="TEST_SHIP_ALL_CLONE" layout="fed_cruiser" img="fed_cruiser">
+	<systemList>
+		<shields power="4" room="11" start="true"/>
+		<engines power="4" room="3" start="true" img="room_engines_2"/>
+		<oxygen power="3" room="9" start="true" img="room_oxygen_4"/>
+		<weapons power="8" room="15" start="true"/>
+		<drones power="6" room="16" start="true" img="room_drones_5"/>
+		<clonebay power="3" room="10" start="true"/>
+		<pilot power="3" room="4" start="true"/>
+		<sensors power="3" room="13" start="true">
+			<slot>
+				<direction>down</direction>
+				<number>1</number>
+			</slot>
+		</sensors>
+		<doors power="3" room="8" start="true" img="room_doors_5">
+			<slot>
+				<direction>right</direction>
+				<number>0</number>
+			</slot>
+		</doors>
+		<teleporter power="3" room="1" start="true"/>
+		<cloaking power="3" room="12" start="true" img="room_cloaking_8"/>
+		<artillery power="4" room="6" start="true" weapon="ARTILLERY_FED"/>
+		<battery power="2" room="14" start="true" img="room_battery_3"/>
+		<mind power="3" room="5" start="true" img="room_mind_7"/>
+		<hacking power="3" room="2" start="true" img="room_hacking_3">
+			<slot>
+				<direction>left</direction>
+				<number>0</number>
+			</slot>
+		</hacking>
+	</systemList>
+	<weaponSlots>4</weaponSlots>
+	<droneSlots>3</droneSlots>
+	<weaponList count="4" missiles="20">
+		<weapon name="LASER_BURST_3"/>
+		<weapon name="LASER_HEAVY_2"/>
+		<weapon name="ION_2"/>
+		<weapon name="MISSILES_2_PLAYER"/>
+	</weaponList>
+	<droneList drones="10"/>
+	<health amount="30"/>
+	<maxPower amount="25"/>
+	<crewCount amount="1" class="human"/>
+	<crewCount amount="1" class="engi"/>
+	<crewCount amount="1" class="mantis"/>
+	<crewCount amount="1" class="rock"/>
+	<crewCount amount="1" class="crystal"/>
+	<crewCount amount="1" class="anaerobic"/>
+</shipBlueprint>
+
+<!--
+  TEST_SHIP_MAX: the realistic worst case for the HUD (default player ship of the `--device` phone preview).
+  Vanilla limits (rules/store.md, ShipManager::CanFitSystem / CanFitSubsystem): fewer than 8 reactor-powered
+  systems to buy another -> at most 8 main systems; fewer than 4 subsystems -> at most 4 (pilot, sensors, doors,
+  battery). Main systems chosen: shields, engines, oxygen, weapons, drones, cloaking, hacking, mind control (no
+  medbay / teleporter / artillery: they would exceed 8). Every system at its blueprint maxPower; reactor 25
+  (vanilla cap), 4 weapon slots, 3 drone slots, 8 crew (vanilla maximum). Same fed_cruiser rooms as TEST_SHIP_ALL.
+-->
+<shipBlueprint name="TEST_SHIP_MAX" layout="fed_cruiser" img="fed_cruiser">
+	<systemList>
+		<shields power="8" room="11" start="true"/>
+		<engines power="8" room="3" start="true" img="room_engines_2"/>
+		<oxygen power="3" room="9" start="true" img="room_oxygen_4"/>
+		<weapons power="8" room="15" start="true"/>
+		<drones power="8" room="16" start="true" img="room_drones_5"/>
+		<pilot power="3" room="4" start="true"/>
+		<sensors power="3" room="13" start="true">
+			<slot>
+				<direction>down</direction>
+				<number>1</number>
+			</slot>
+		</sensors>
+		<doors power="3" room="8" start="true" img="room_doors_5">
+			<slot>
+				<direction>right</direction>
+				<number>0</number>
+			</slot>
+		</doors>
+		<cloaking power="3" room="12" start="true" img="room_cloaking_8"/>
+		<battery power="2" room="14" start="true" img="room_battery_3"/>
+		<mind power="3" room="5" start="true" img="room_mind_7"/>
+		<hacking power="3" room="2" start="true" img="room_hacking_3">
+			<slot>
+				<direction>left</direction>
+				<number>0</number>
+			</slot>
+		</hacking>
+	</systemList>
+	<weaponSlots>4</weaponSlots>
+	<droneSlots>3</droneSlots>
+	<weaponList count="4" missiles="20">
+		<weapon name="LASER_BURST_3"/>
+		<weapon name="LASER_HEAVY_2"/>
+		<weapon name="ION_2"/>
+		<weapon name="MISSILES_2_PLAYER"/>
+	</weaponList>
+	<droneList drones="10"/>
+	<health amount="30"/>
+	<maxPower amount="25"/>
+	<crewCount amount="2" class="human"/>
+	<crewCount amount="2" class="engi"/>
+	<crewCount amount="1" class="mantis"/>
+	<crewCount amount="1" class="rock"/>
+	<crewCount amount="1" class="energy"/>
+	<crewCount amount="1" class="slug"/>
+</shipBlueprint>
+
+</FTL>

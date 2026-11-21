@@ -1,0 +1,7 @@
+{
+	"id": "qol",
+	"name": "Quality of life",
+	"version": "0.1.0",
+	"entry": "qol.gd",
+	"description": "Optional QoL groups from rules/qol_plan.md, built only on the public hooks (rules/hooks.md). Everything is OFF by default."
+}

@@ -1,0 +1,46 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="FTL Proto"
+run/main_scene="res://frame_host.tscn"
+config/features=PackedStringArray("4.7")
+
+[autoload]
+
+Hooks="*res://scripts/mod/hooks.gd"
+Settings="*res://scripts/mod/settings.gd"
+FtlData="*res://scripts/ftl_data.gd"
+Mods="*res://scripts/mod/mods.gd"
+TooltipService="*res://scripts/ui/tooltip_service.gd"
+Music="*res://scripts/audio/music_director.gd"
+DevicePreview="*res://scripts/debug/device_preview.gd"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/size/mode.android=3
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/handheld/orientation=4
+
+[ftl]
+
+display/frame_scaling="sharp"
+hangar/unlock_all_ships=false
+
+[rendering]
+
+textures/canvas_textures/default_texture_filter=0
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/vram_compression/import_etc2_astc=true

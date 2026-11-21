@@ -1,0 +1,17 @@
+# FTL game data (extracted from the player's own ftl.dat) and research material: never committed
+ftl-data/
+work/
+
+# Build output
+build/
+*.apk
+*.idsig
+
+# Godot
+godot/.godot/
+godot/android/
+*.translation
+
+# Misc
+__pycache__/
+*.pyc

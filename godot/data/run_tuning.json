@@ -1,0 +1,75 @@
+{
+	"_comment": "Project-owned tunables of the game loop (numbers from rules/starmap.md, rules/events.md). Not FTL data. [placeholder] values are not from the exe.",
+	"map": {
+		"grid_w": 6, "grid_h": 4, "cell": 110, "margin": 10, "spread": 90,
+		"empty_roll": 5, "empty_ratio": 4, "y_max": 415, "top_right_y_min": 30, "top_right_from_col": 4,
+		"link_distance": 165, "exit_cols": [4, 2], "exit_min_nodes": 5, "exit_max_nodes": 100, "exit_tries": 16,
+		"nebula_small_below": 6, "nebula_min_free": 4, "nebula_attempts": 21,
+		"nebula_small": ["map/nebula_0.png", "map/nebula_1.png", "map/nebula_2.png", "map/nebula_3.png"],
+		"nebula_large": ["map/nebula_large_0.png", "map/nebula_large_1.png", "map/nebula_large_2.png"],
+		"origin": [45, 40]
+	},
+	"names": {
+		"start_game": "START_GAME", "start_beacon": "START_BEACON", "finish": "FINISH_BEACON",
+		"finish_nebula": "FINISH_BEACON_NEBULA", "neutral": "NEUTRAL", "nebula": "NEBULA",
+		"destroyed_default": "DESTROYED_DEFAULT", "dead_crew_default": "DEAD_CREW_DEFAULT",
+		"stalemate": "STALEMATE_SURRENDER", "equip_full": "EQUIP_FULL", "augment_full": "AUGMENT_FULL",
+		"first_sector": "STANDARD_SPACE", "first_sector_name": "sectorname_CIVILIAN_SECTOR",
+		"default_auto_blueprint": "SHIPS_REBEL"
+	},
+	"event_files": ["events.xml", "dlcEvents.xml", "dlcEvents_anaerobic.xml", "newEvents.xml", "events_rebel.xml",
+		"events_mantis.xml", "events_engi.xml", "events_pirate.xml", "events_fuel.xml", "events_nebula.xml",
+		"events_ships.xml", "events_imageList.xml", "events_crystal.xml", "events_boss.xml", "events_zoltan.xml",
+		"events_slug.xml", "events_rock.xml", "dlcEventsOverwrite.xml", "sector_data.xml"],
+	"reward": {
+		"scrap_variance": [[0.5, 0.7], [0.8, 1.3], [1.3, 1.55]],
+		"fuel": [[1, 3], [2, 4], [3, 6]],
+		"missiles": [[1, 2], [2, 4], [4, 8]],
+		"droneparts": [[1, 1], [1, 1], [1, 2]],
+		"scrap_base": 15, "scrap_per_level": 6,
+		"standard_item_percent": 3, "stuff_item_percent": 6,
+		"full_cargo_scrap": 25, "max_augments": 3, "cargo_slots": 4
+	},
+	"ftl_drive": {
+		"_comment": "rules/ftl_drive.md (EngineSystem::GetEngineSpeed, ShipManager ctor/OnLoop). Speed per clock unit = ((bars - 1) * per_bar + base) * scale * (1 + FTL_BOOSTER) * manning[skill], capped at cap; the timer fills to timer_max.",
+		"timer_max": 85.0, "per_bar": 0.35, "base": 1.25, "scale": 0.0625, "cap": 1.2,
+		"manning": [1.0, 1.1, 1.17, 1.25], "boost_aug": "FTL_BOOSTER", "boost_mult": 3.0
+	},
+	"sectors": {
+		"_comment": "rules/starmap.md §1 (StarMap::GenerateSectorMap / AddSectorColumn / GetRandomSectorChoice).",
+		"columns": 6, "x_step": 66, "y_step": 50, "first_pos": [0, 75],
+		"class_roll": 10, "nebula_below": 2, "hostile_from": 6,
+		"classes": ["CIVILIAN", "HOSTILE", "NEBULA"], "final": "FINAL", "final_level": 7
+	},
+	"fleet": {
+		"_comment": "rules/starmap.md §4 (danger zone).",
+		"radius": 767, "start_x": -959, "start_y": 50, "start_y_spread": 250, "x_cap": 60,
+		"move": [64, 51, 32], "move_double": [128, 102, 64],
+		"names": {"fleet": "FLEET_EASY", "fleet_nebula": "FLEET_EASY_NEBULA", "fleet_beacon": "FLEET_EASY_BEACON",
+			"no_fuel": "NO_FUEL", "no_fuel_distress": "NO_FUEL_DISTRESS", "no_fuel_fleet": "NO_FUEL_FLEET"}
+	},
+	"store": {
+		"_comment": "rules/store.md.",
+		"sections_min": 2, "sections_extra": 3,
+		"fuel": [3, 5, 3], "missiles": [2, 5, 6], "droneparts": [2, 3, 8],
+		"repair_cost": [[0, 2], [3, 3], [6, 4]], "max_crew": 8, "max_augments": 3,
+		"crew_cost": {"human": 45, "engi": 50, "mantis": 55, "rock": 55, "slug": 45, "crystal": 60, "energy": 60, "anaerobic": 50},
+		"system_ids": ["shields", "engines", "oxygen", "weapons", "drones", "medbay", "pilot", "sensors", "doors", "teleporter", "cloaking", "artillery", "battery", "clonebay", "mind", "hacking"],
+		"subsystems": ["pilot", "sensors", "doors", "battery"],
+		"free_drones": ["DEFENSE_1", "REPAIR", "COMBAT_1"], "max_main_systems": 8, "max_subsystems": 4,
+		"random_skills": [[0, 0], [0, 0], [0, 1], [0, 2], [1, 2], [1, 2], [1, 3], [2, 3]]
+	},
+	"ship_gen": {
+		"_comment": "rules/events.md §5.3 (ShipGenerator::CreateShip).",
+		"crew_scale": 0.125, "level_scale": 0.125, "scrap_mul": 25, "scrap_pow": 1.8, "scrap_add": 150,
+		"drone_parts_cap": 20
+	},
+	"escape": {"default_timer": 15.0, "jammer_aug": "FTL_JAMMER", "jammer_rate": 0.5},
+	"quests": {
+		"_comment": "rules/events.md §2.4, rules/starmap.md 'Quests' and 'Secret sector' (StarMap::AddQuest, StartSecretSector).",
+		"danger_radius": 767, "jump_len": 64, "max_delay_level": 5,
+		"text_added": "added_quest", "text_next_sector": "added_quest_sector", "text_no_time": "no_time",
+		"rock_home": "ROCK_HOME", "rock_beacon": "ROCK_CRYSTAL_BEACON", "crystal_race": "crystal",
+		"ruwen_name": "name_Ruwen", "secret_sector": "CRYSTAL_HOME", "final_level": 7
+	}
+}

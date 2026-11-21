@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Engine texts of our own (English, [ours]; not FTL data). Loaded after the vanilla text_*.xml by FtlData.tr_id;
+     an id already defined by vanilla wins. -->
+<FTL>
+<text name="tooltip_power_mode">Energy Tap: Add or reduce power.\n+ : Tapping a system, weapon or drone adds power. Tapping a powered weapon arms it.\n- : Tapping removes power. Weapons and drones are switched off.\n\nHold a finger on the screen and tap with another finger to remove power.</text>  <!-- Touch power mode toggle (TouchPowerToggle) -->
+<text name="fold_layout">Unfolded Screen Layout: \1</text>  <!-- Options window, GAMEPLAY, touch only (GameOptions.fold_layout) -->
+<text name="fold_layout_split">Split</text>
+<text name="fold_layout_pan">Pan</text>
+<text name="phone_layout">Phone Screen Layout: \1</text>  <!-- Options window, GAMEPLAY, touch only (GameOptions.phone_layout) -->
+<text name="phone_layout_column">Column</text>
+<text name="phone_layout_pan">Pan</text>
+<text name="window_size">Window Size: \1</text>  <!-- Options window, GAMEPLAY, PC only (GameOptions.window_size) -->
+<text name="profile_button">PROFILE \1</text>  <!-- Main menu corner button (ProfileView, ProfileSlots) -->
+<text name="profiles_title">PROFILES</text>
+<text name="profile_name">PROFILE \1</text>
+<text name="profile_unlocked">Ships unlocked: \1%</text>
+<text name="profile_achievements">Achievements: \1 / \2</text>
+<text name="profile_saved_run">Saved run</text>
+<text name="profile_empty">Empty</text>
+<text name="profile_active">ACTIVE</text>
+<text name="profile_select">SELECT</text>
+<text name="profile_unlock_all">UNLOCK ALL</text>
+<text name="profile_delete">DELETE</text>
+<text name="profile_close">CLOSE</text>
+<text name="profile_unlock_confirm">Unlock every ship and layout in this profile?\n\nYou will skip the unlock progression and may spoil ships you have not discovered yet. This cannot be undone.</text>
+<text name="profile_delete_confirm">Delete this profile?\n\nIts unlocks, achievements, scores, statistics and saved run will be lost. This cannot be undone.</text>
+</FTL>
