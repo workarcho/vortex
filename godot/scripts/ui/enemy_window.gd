@@ -175,18 +175,42 @@ func _draw_status(o: Vector2) -> void:
 	for i in enemy.max_shield_layers():
 		var on := i < enemy.shield_layers
 		HudDraw.img(self, "combatUI/%s.png" % shield_image(on, hacked), o + Vector2(HudLayout.SHIELD_STEP * i, 36))
-	if enemy.super_shield > 0:
-		# Flagship 12-point super shield: the long frame (box_hostiles_shield_super12, 126 px).
-		HudDraw.img(self, "combatUI/box_hostiles_shield_super%d.png" % (12 if enemy.super_shield_max > 5 else 5),
-			o + Vector2(13, 35))
-		draw_rect(Rect2(o + Vector2(16, 38), Vector2(10 * enemy.super_shield, 7)), FtlColors.GREEN)
-	elif enemy.shield_layers < enemy.max_shield_layers():
+	# Vanilla draws the recharge bar and then, independently, the super shield bar (different rows).
+	if enemy.shield_layers < enemy.max_shield_layers():
 		var r := clampf(enemy.shield_charger / ShipState.SHIELD_CHARGE_TIME, 0.0, 1.0)
 		if r > 0.0:
 			draw_rect(Rect2(o + Vector2(5, 57), Vector2(roundf(52 * r), 6)),
 				FtlColors.PURPLE_HACK if hacked else Color8(27, 132, 255))
+	if enemy.super_shield > 0:
+		_draw_super_shield(o)
 	if enemy.is_destroyed():
 		HudDraw.text(self, 62, "DESTROYED", o + Vector2(160, -36), HudLayout.RED_WARNING)
+
+
+## Super shield bar of RenderShipStatus (0x0055ef20, tail): placed to the RIGHT of the shield bubbles on the same
+## row, x = 23 · max layers (ShieldPower.second, the bubble count). Frame at (x + 13, 35):
+## box_hostiles_shield_super5.png when the super shield max is 5, _super12.png when 12, otherwise a
+## (0, 0, 0, 0.5) rect (10 · max + 6) × 13 with a 2 px white outline. Fill: COLOR_GREEN rect at (x + 16, 38),
+## 10 px per point, height 7. Drawn only while the super shield is > 0.
+func _draw_super_shield(o: Vector2) -> void:
+	var r := super_shield_rects(enemy.max_shield_layers(), enemy.super_shield, enemy.super_shield_max)
+	var smax := enemy.super_shield_max
+	if smax == 5 or smax == 12:
+		HudDraw.img(self, "combatUI/box_hostiles_shield_super%d.png" % smax, o + r[0].position)
+	else:
+		var box: Rect2 = r[0]
+		box.position += o
+		draw_rect(box, Color(0, 0, 0, 0.5))
+		draw_rect(box, Color.WHITE, false, 2.0)
+	var fill: Rect2 = r[1]
+	fill.position += o
+	draw_rect(fill, FtlColors.GREEN)
+
+
+## [frame rect, fill rect] of the enemy super shield bar, relative to the status origin (see _draw_super_shield).
+static func super_shield_rects(max_layers: int, points: int, points_max: int) -> Array:
+	var x := HudLayout.SHIELD_STEP * max_layers
+	return [Rect2(x + 13, 35, 10 * points_max + 6, 13), Rect2(x + 16, 38, maxi(10 * points, 0), 7)]
 
 
 ## Bubble image of one enemy shield layer: box_hostiles_shield1 = filled (charged layer), box_hostiles_shield2 =

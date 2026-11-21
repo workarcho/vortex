@@ -34,6 +34,7 @@ func _run() -> void:
 	test_drone_and_flagship()
 	test_blocks()
 	test_bubble_geometry()
+	test_target_bar()
 
 
 func zoltan() -> ShipState:
@@ -222,3 +223,19 @@ func test_bubble_geometry() -> void:
 	print("Unknown weapon names (BlueprintManager::GetWeaponBlueprint default blueprint)")
 	check("BOMB_BREACH (WEAPONS_JELLY) unknown, BOMB_BREACH_1 known",
 		[FtlData.has_weapon_blueprint("BOMB_BREACH"), FtlData.has_weapon_blueprint("BOMB_BREACH_1")], [false, true])
+
+
+## CombatControl::RenderShipStatus (0x0055ef20): the enemy super shield bar sits to the right of the shield bubbles
+## (x = 23 * max layers), frame (x + 13, 35) = box_hostiles_shield_super5 / 12 (10 * max + 6 wide, 13 high), green
+## fill (x + 16, 38), 10 px per point, 7 high.
+func test_target_bar() -> void:
+	print("TARGET window super shield bar (CombatControl::RenderShipStatus)")
+	var r := EnemyWindow.super_shield_rects(2, 5, 5)
+	check("2 bubbles, 5/5: frame / fill", r, [Rect2(59, 35, 56, 13), Rect2(62, 38, 50, 7)])
+	check("frame starts after the last bubble (x 23 + 21 = 44)", r[0].position.x > HudLayout.SHIELD_STEP + 21, true)
+	r = EnemyWindow.super_shield_rects(4, 3, 12)
+	check("4 bubbles, 3/12 (flagship)", r, [Rect2(105, 35, 126, 13), Rect2(108, 38, 30, 7)])
+	check("frame widths match the images",
+		[FtlData.texture("img/combatUI/box_hostiles_shield_super5.png").get_width(),
+		FtlData.texture("img/combatUI/box_hostiles_shield_super12.png").get_width()],
+		[int(EnemyWindow.super_shield_rects(0, 0, 5)[0].size.x), int(EnemyWindow.super_shield_rects(0, 0, 12)[0].size.x)])
