@@ -27,7 +27,8 @@ const WEAPON_SKIP := ["bp", "target_ship", "target_room", "target_point", "targe
 const CREW_SKIP := ["path", "state", "task", "fire_tile", "selected", "hovered", "_crossing_door", "target",
 	"blocking_door", "fighting", "shared_spot", "shoot_timer", "shoot_goal", "punch_time", "punch_goal",
 	"punch_hit", "shots", "damage_done", "aim", "shoot_anim", "shot_frame_done", "shots_fired", "medbay_rate",
-	"death_sound_done", "last_shots_fired", "drone", "frozen", "skill_up", "resisted", "level_up", "last_level_up"]
+	"death_sound_done", "last_shots_fired", "drone", "frozen", "skill_up", "resisted", "level_up", "last_level_up",
+	"boarding_health_limit"]
 
 
 static func snapshot(ship: ShipState) -> Dictionary:
@@ -145,8 +146,16 @@ static func apply(ship: ShipState, d: Dictionary) -> void:
 
 
 static func crew_restore(cd: Dictionary) -> CrewMember:
-	var c := CrewMember.new(String(cd.race), bool(cd.player_owned))
-	SaveCodec.set_props(c, cd.p)
+	var race := String(cd.race)
+	var p: Dictionary = cd.p
+	if race == "random":  # saves made before crew class "random" was resolved (pirate ships): pick a race now
+		var rng := RandomNumberGenerator.new()
+		rng.seed = hash(str(p.get("name", ""))) & 0x7fffffff
+		race = ShipGenerator.random_race({}, rng)
+		p = p.duplicate()
+		p.erase("race")
+	var c := CrewMember.new(race, bool(cd.player_owned))
+	SaveCodec.set_props(c, p)
 	return c
 
 

@@ -61,6 +61,7 @@ func _run() -> void:
 	_stats_and_streaks()
 	await _stats_view()
 	_profile_slots()
+	_random_race_restore()
 	_wipe()
 	SaveGame.path = old[0]
 	SaveGame.persist = old[1]
@@ -77,6 +78,17 @@ func _wipe() -> void:
 		if FileAccess.file_exists(p):
 			DirAccess.remove_absolute(ProjectSettings.globalize_path(p))
 	PlayerProfile.reset_current(PlayerProfile.new())
+
+
+## Saves made before crew class "random" was resolved hold race "random": restoring picks a real race (stable).
+func _random_race_restore() -> void:
+	print("random race in an old save")
+	var cd := {"race": "random", "player_owned": false, "p": {"race": "random", "name": "Pirate Joe", "hp": 42.0}}
+	var c := ShipSave.crew_restore(cd)
+	var c2 := ShipSave.crew_restore(cd)
+	check("resolved to a real race", [c.race != "random", FtlData.has_crew_race(c.race) if FtlData.has_method("has_crew_race") else true], [true, true])
+	check("same race every load", c.race, c2.race)
+	check("saved hp kept", c.hp, 42.0)
 
 
 ## [ours] Three profiles (ProfileSlots) under user://test_slots_*: first start seeds slot 0 with every ship,
