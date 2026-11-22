@@ -3,7 +3,8 @@ extends Node
 ## A/B/C, enemies, pirates, bosses), with every listed system installed, each manned station (boostable system)
 ## has its console slot inside the room, the art under it matches (enemy computer1.png on the slot; player
 ## interior image whose rooms.xml glow sits on the console tile and faces the console direction), and a crew
-## member placed there mans it facing the console. Player rooms without `img` stay bare as in the exe. Also the
+## member placed there mans it facing the console. Player systems without `img` use the exe's default interior
+## image "room_" + name (ShipSystem::ShipSystem). Also the
 ## hangar HIDE ROOMS view (hull only) and the hangar air (lanius drain). Uses the user's FTL data. Run:
 ##   godot --headless --path godot res://tests/test_room_consoles.tscn
 
@@ -109,14 +110,41 @@ func _run() -> void:
 	check("every console slot lies inside its room", bad_slot, [])
 	check("console art sits on the console slot and faces its direction", bad_art, [])
 	check("crew on the console man it facing the console", bad_face, [])
-	# Vanilla data: these player rooms have no `img` (or no rooms.xml glow), so the exe draws nothing there.
-	print("  bare player stations (no interior image in the blueprint): ", bare.size())
-	check("Kestrel A: every station has its interior console except doors / sensors (no glow layout)",
+	# A player system without `img` gets the default "room_" + name (ShipSystem::ShipSystem), so the only stations
+	# without a lit console are doors / sensors, whose room_doors* / room_sensors* images have no rooms.xml glow.
+	print("  player stations without a glow layout (doors / sensors): ", bare.size())
+	check("only doors / sensors stations lack a console glow",
+		bare.filter(func(x): return not (x.ends_with(":doors") or x.ends_with(":sensors"))), [])
+	check("Kestrel A: every station has its interior console except doors / sensors",
 		bare.filter(func(x): return x.begins_with("PLAYER_SHIP_HARD:")), ["PLAYER_SHIP_HARD:doors",
 		"PLAYER_SHIP_HARD:sensors"])
-	check("Mantis A pilot room is bare in vanilla (no img)", bare.has("PLAYER_SHIP_MANTIS:pilot"), true)
+	check("Mantis A pilot room (no img) draws the default room_pilot console",
+		bare.has("PLAYER_SHIP_MANTIS:pilot"), false)
 	check("Lanius A: all stations drawn but doors / sensors",
 		bare.filter(func(x): return x.begins_with("PLAYER_SHIP_ANAEROBIC:")).size(), 2)
+
+	print("Default interior image (ShipSystem::ShipSystem \"room_\" + name; empty img keeps it)")
+	var fed := ShipState.new("PLAYER_SHIP_FED", true)
+	var no_img := []
+	for id in ["pilot", "shields", "weapons", "sensors", "medbay"]:
+		no_img.append(ShipView.interior_image(id, fed.system_by_id(id)))
+	check("Fed A pilot / shields / weapons / sensors / medbay (no img)", no_img,
+		["room_pilot", "room_shields", "room_weapons", "room_sensors", "room_medbay"])
+	check("Fed A oxygen keeps its img", ShipView.interior_image("oxygen", fed.system_by_id("oxygen")),
+		"room_oxygen_4")
+	check("Fed A artillery (no img) -> room_artillery", ShipView.interior_image("artillery",
+		fed.system_by_id("artillery")), "room_artillery")
+	check("clonebay never gets a default image", ShipView.interior_image("clonebay", {}), "")
+	var missing := []
+	for bp in names:
+		if not String(bp).begins_with("PLAYER_SHIP"):
+			continue
+		var ps := ShipState.new(bp, true)
+		for b in ps.blueprint.systems:
+			var n := ShipView.interior_image(b.id, b)
+			if n != "" and b.id not in ["teleporter"] and FtlData.texture("img/ship/interior/%s.png" % n) == null:
+				missing.append("%s:%s" % [bp, n])
+	check("every player system's interior image exists (teleporter draws pads instead)", missing, [])
 
 	print("Hangar HIDE ROOMS (ShipManager::bShowRoom false: RenderWeapons + Ship::OnRenderJump(0))")
 	var k := ShipState.new("PLAYER_SHIP_HARD", true)

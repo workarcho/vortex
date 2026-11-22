@@ -1172,8 +1172,18 @@ func _draw_interiors() -> void:
 			_draw_hacked_console(s, b)
 
 
-func _draw_player_interior(s: SystemState, b: Dictionary, rect: Rect2) -> void:
+## Interior image name of a player system (§4): the blueprint `img`, else the default `"room_" + name` that
+## ShipSystem::ShipSystem (0x61bab0) sets for every system but the clonebay; ShipManager::AddSystem then calls the
+## SetFloorImage wrapper (0x61ba70), which keeps the default when `img` is empty.
+static func interior_image(id: String, b: Dictionary) -> String:
 	var img: String = b.get("img", "")
+	if img != "":
+		return img
+	return "" if id == "clonebay" else "room_" + id
+
+
+func _draw_player_interior(s: SystemState, b: Dictionary, rect: Rect2) -> void:
+	var img := interior_image(s.id, b)
 	if img == "":
 		return
 	var tex := FtlData.texture("img/ship/interior/" + img + ".png")
@@ -1199,15 +1209,15 @@ func _draw_player_interior(s: SystemState, b: Dictionary, rect: Rect2) -> void:
 
 ## What is drawn under the manning slot of a system's room (rules/ship_rendering.md §4), for checks and tests:
 ## {kind: "computer" (enemy computer1.png), "interior" (player <img> whose rooms.xml glow sits on a tile),
-## "bare" (player room without `img` or without a glow layout: the exe draws no console, the crew still man it),
-## "" (no console slot), slot (console slot or the glow's tile), dir (lower-case facing)}.
+## "bare" (player interior image without a rooms.xml glow layout, e.g. room_doors / room_sensors: no lit console,
+## the crew still man it), "" (no console slot), slot (console slot or the glow's tile), dir (lower-case facing)}.
 func console_art(s: SystemState) -> Dictionary:
 	var slot := ship.graph.console_slot(s.room)
 	if slot < 0 or _computer_level(s) < 0:
 		return {"kind": "", "slot": -1, "dir": ""}
 	if not ship.is_player:
 		return {"kind": "computer", "slot": slot, "dir": ship.graph.console_dir(s.room)}
-	var img: String = ship.system_by_id(s.id).get("img", "")
+	var img := interior_image(s.id, ship.system_by_id(s.id))
 	var lay := FtlData.room_layout(img) if img != "" else {}
 	var glow := FtlData.texture("img/ship/interior/%s1.png" % lay.name) if not lay.is_empty() else null
 	if glow == null or FtlData.texture("img/ship/interior/" + img + ".png") == null:
