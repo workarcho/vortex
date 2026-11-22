@@ -110,8 +110,10 @@ func setup(state: ShipState) -> void:
 	var img: String = ship.blueprint.img
 	if ship.is_player:
 		hull_tex = FtlData.texture("img/ship/" + img + "_base.png")
-		floor_tex = FtlData.texture("img/ship/" + img + "_floor.png")
-		shield_tex = FtlData.first_texture(["img/ship/" + img + "_shields1.png", "img/ship/enemy_shields.png"])
+		floor_tex = FtlData.texture("img/ship/" + String(ship.blueprint.get("floor_img", img)) + "_floor.png")
+		# Shields::Shields 0x0060b230: player = "ship/<shieldFile>_shields1.png" (<shieldImage>, default img).
+		shield_tex = FtlData.first_texture(["img/ship/" + String(ship.blueprint.get("shield_img", img)) + "_shields1.png",
+			"img/ship/enemy_shields.png"])
 	else:
 		hull_tex = FtlData.first_texture([
 			"img/ships_glow/" + img + "_base.png", "img/ship/" + img + "_base.png"])
@@ -1546,7 +1548,7 @@ static func bubble_rect(s: ShipState, tex_size: Vector2) -> Rect2:
 ## Shields::RenderBase(alpha) with the given layer counts: the white bubble, alpha = layers / (3.5 player,
 ## 4 enemy) × 0.6 + 0.4 (nothing at 0 layers or max 0), scaled by the shieldsUp progress; then the super shield
 ## (§9) tinted COLOR_GREEN, alpha n / max(5, superMax), × 0.6 + 0.4 when the normal shield has no layer (unscaled).
-## Player: `<img>_shields1.png` at its own pixel size centred on the ellipse (scale 1); enemy: enemy_shields.png
+## Player: `<shieldImage>_shields1.png` at its own pixel size centred on the ellipse (scale 1); enemy: enemy_shields.png
 ## stretched to 2a × 2b. Normal alpha blend, no additive pass.
 func _render_base(ci: CanvasItem, layers: int, max_layers: int, super_n: int, alpha: float, super_max := -1) -> void:
 	var rect := bubble_rect(ship, shield_tex.get_size())

@@ -203,7 +203,41 @@ func test_bubble_geometry() -> void:
 	check("player centre: no enemy offset", k.shield_center, kc + Vector2(-30, 0))
 	check("player bubble = image size about the centre", ShipView.bubble_rect(k, Vector2(700, 440)),
 		Rect2(k.shield_center - Vector2(350, 220), Vector2(700, 440)))
-	var jp := ShipState.new("JELLY_BUTTON_P_DLC", false)  # dlcPirateBlueprints.xml "Pirate Scout": 170 205 0 -50
+	# BlueprintManager::ProcessShipBlueprint 0x005e77b0: shieldFile / floorFile default to img, <shieldImage> /
+	# <floorImage> override them; Shields::Shields 0x0060b230 loads "ship/<shieldFile>_shields1.png" for the
+	# player. Kestrel B (img kestral_2, no kestral_2_shields1.png) uses kestral_shields1.png 700 x 440 — it used to
+	# fall back to enemy_shields.png 340 x 410 at its own size, a small bubble around the engines.
+	var k2 := ShipState.new("PLAYER_SHIP_HARD_2", true)
+	check("Kestrel B shield / floor image names", [k2.blueprint.shield_img, k2.blueprint.floor_img],
+		["kestral", "kestral_2"])
+	check("Kestrel A: names default to img", [k.blueprint.shield_img, k.blueprint.floor_img], ["kestral", "kestral"])
+	var v2 := ShipView.new()
+	add_child(v2)
+	v2.setup(k2)
+	check("Kestrel B bubble = kestral_shields1.png 700 x 440 about the centre", ShipView.bubble_rect(k2,
+		v2.shield_tex.get_size()), Rect2(k2.shield_center - Vector2(350, 220), Vector2(700, 440)))
+	var k3 := ShipState.new("PLAYER_SHIP_HARD_3", true)  # Kestrel C: <shieldImage>/<floorImage> kestral
+	var v3 := ShipView.new()
+	add_child(v3)
+	v3.setup(k3)
+	check("Kestrel C: kestral shield image and floor", [v3.shield_tex.get_size(), v3.floor_tex != null],
+		[Vector2(700, 440), true])
+	v2.queue_free()
+	v3.queue_free()
+	var missing := []
+	for bp in ["PLAYER_SHIP_HARD", "PLAYER_SHIP_HARD_2", "PLAYER_SHIP_HARD_3", "PLAYER_SHIP_CIRCLE",
+			"PLAYER_SHIP_CIRCLE_2", "PLAYER_SHIP_CIRCLE_3", "PLAYER_SHIP_FED", "PLAYER_SHIP_FED_2", "PLAYER_SHIP_FED_3",
+			"PLAYER_SHIP_ENERGY", "PLAYER_SHIP_ENERGY_2", "PLAYER_SHIP_ENERGY_3", "PLAYER_SHIP_MANTIS",
+			"PLAYER_SHIP_MANTIS_2", "PLAYER_SHIP_MANTIS_3", "PLAYER_SHIP_STEALTH", "PLAYER_SHIP_STEALTH_2",
+			"PLAYER_SHIP_STEALTH_3", "PLAYER_SHIP_ANAEROBIC", "PLAYER_SHIP_ANAEROBIC_2", "PLAYER_SHIP_CRYSTAL",
+			"PLAYER_SHIP_CRYSTAL_2", "PLAYER_SHIP_JELLY", "PLAYER_SHIP_JELLY_2", "PLAYER_SHIP_JELLY_3",
+			"PLAYER_SHIP_ROCK", "PLAYER_SHIP_ROCK_2", "PLAYER_SHIP_ROCK_3"]:
+		var sb := FtlData.ship_blueprint(bp)
+		for f in ["img/ship/%s_shields1.png" % sb.shield_img, "img/ship/%s_floor.png" % sb.floor_img]:
+			if FtlData.texture(f) == null:
+				missing.append(f)
+	check("every player ship A/B/C resolves its shield and floor images", missing, [])
+	var jp :=ShipState.new("JELLY_BUTTON_P_DLC", false)  # dlcPirateBlueprints.xml "Pirate Scout": 170 205 0 -50
 	check("pirate blueprint loaded, ellipse", [jp.shield_axes, jp.layout.get("vertical", 0)], [Vector2(170, 205), 55])
 	print("TARGET stencil (CombatControl::DrawHostileBox)")
 	var img := FtlData.texture("img/combatUI/box_hostiles_mask.png").get_image()

@@ -205,6 +205,11 @@ func _parse_ship_blueprint(head: Dictionary, body: String) -> Dictionary:
 		"img": head.get("img", ""),
 		# <cloakImage> overrides the cloak image base name (default: img) — BlueprintManager::ProcessShipBlueprint
 		"cloak_img": tag_value(body, "cloakImage") if tag_value(body, "cloakImage") != "" else head.get("img", ""),
+		# <shieldImage> / <floorImage> override the shield / floor base names the same way (shieldFile, floorFile;
+		# B/C layouts reuse the A ship's art: Kestrel B "kestral_2" -> kestral_shields1.png). Shields::Shields
+		# 0x0060b230 loads "ship/<shieldFile>_shields1.png" for the player (rules/hud_layout.md).
+		"shield_img": tag_value(body, "shieldImage") if tag_value(body, "shieldImage") != "" else head.get("img", ""),
+		"floor_img": tag_value(body, "floorImage") if tag_value(body, "floorImage") != "" else head.get("img", ""),
 		"systems": [],
 		"hull": int(tag_attrs(body, "health").get("amount", "0")),
 		"max_power": int(tag_attrs(body, "maxPower").get("amount", "0")),
