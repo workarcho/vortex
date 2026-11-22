@@ -166,6 +166,19 @@ func average_oxygen() -> float:
 func tick(seconds: float) -> void:
 	if seconds <= 0.0:
 		return
+	tick_air(seconds)
+	_tick_fire(seconds)
+	_tick_doors(seconds)
+	_tick_crew(seconds)
+	update_door_sounds()
+
+
+## The air part of `tick` (OxygenSystem refill / drain, spread, fire O2 use, airlocks, breaches and lanius drain).
+## Also run alone by the hangar preview: ShipBuilder::OnLoop runs the full ShipManager::OnLoop on the shown ship,
+## so its lanius crew empty their rooms there (vanilla Lanius A hangar: engines and weapons rooms red).
+func tick_air(seconds: float) -> void:
+	if seconds <= 0.0:
+		return
 	_tick_oxygen_system(seconds)
 	_redistribute(seconds)
 	var lanius := lanius_per_room()
@@ -193,10 +206,6 @@ func tick(seconds: float) -> void:
 	leaking_o2 = _leaking and has_o2
 	for room_id in oxygen.keys():
 		oxygen[room_id] = clampf(oxygen[room_id], 0.0, 100.0)
-	_tick_fire(seconds)
-	_tick_doors(seconds)
-	_tick_crew(seconds)
-	update_door_sounds()
 
 
 ## Anaerobic crew (lanius) per room (iRoomId; any owner, alive or dying), only on ships with an oxygen system.

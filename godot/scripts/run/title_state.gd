@@ -296,11 +296,16 @@ func _sync_preview_crew() -> void:
 
 ## What main.gd needs to start the run (Start → the existing `--run` flow).
 func run_config() -> Dictionary:
-	return {"ship": blueprint_of(ship_id, ship_type), "difficulty": difficulty, "ae": ae, "ship_name": ship_name,
+	var cfg := {"ship": blueprint_of(ship_id, ship_type), "difficulty": difficulty, "ae": ae, "ship_name": ship_name,
 		"crew": crew.duplicate(true)}
+	# WorldManager::StartGame gets the hangar's own ShipManager (ShipBuilder::GetShip), so the run starts with the
+	# oxygen the preview had (lanius rooms already drained).
+	if preview != null and preview.blueprint.get("name", "") == cfg.ship:
+		cfg["oxygen"] = preview.env.oxygen.duplicate()
+	return cfg
 
 
-## Gives a new run's player ship the hangar's ship name and crew identities (blueprint order).
+## Gives a new run's player ship the hangar's ship name, crew identities (blueprint order) and room oxygen.
 static func apply_to_ship(ship: ShipState, cfg: Dictionary) -> void:
 	if cfg.has("ship_name"):
 		ship.ship_title = String(cfg.ship_name)
@@ -308,3 +313,7 @@ static func apply_to_ship(ship: ShipState, cfg: Dictionary) -> void:
 	for i in mini(ids.size(), ship.crew.size()):
 		if String(ids[i].get("race", "")) == ship.crew[i].race:
 			CrewIdentity.apply(ship.crew[i], ids[i])
+	var o2: Dictionary = cfg.get("oxygen", {})
+	for k in o2:  # room id -> % (int keys, or strings after a JSON save)
+		if ship.env.oxygen.has(int(k)):
+			ship.env.oxygen[int(k)] = float(o2[k])

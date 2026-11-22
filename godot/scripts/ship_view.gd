@@ -75,7 +75,8 @@ var _ext_emitters := {}  # room id -> {parts, counter}: FIRE_EXTINGUISHERS cloud
 const SLUG_GEL_TINT := Color8(207, 70, 253)  # COLOR_PURPLE [inferred value]
 
 
-var hide_interior := false  # hangar HIDE ROOMS: hull, floor and weapons only
+var hide_interior := false  # hangar HIDE ROOMS (bShowRoom false): weapons, hull and thrusters only
+var drew_interior := false  # the last _draw_ship drew rooms / crew (past the interior gate); for tests
 ## Camera rotation this view is shown with (Space.fixed_rotation; main.gd split layout: PI / 2, the ship faces up).
 ## What is meant to be read upright — system symbols, crew (sprite, outline, health bar, status icons), fires,
 ## smoke and breaches — is drawn turned by it about its own centre, so it stays upright on screen; hull, floor,
@@ -581,7 +582,7 @@ func _draw_jump() -> void:
 			draw_texture_rect(glare, Rect2(hull_pos + Vector2(g[0], g[1]), Vector2(g[2], g[2])), false)
 	# Player ship (bShowEngines): the thrusters at alpha 1 − min(progress / 0.75, 1), after the glare.
 	if ship.is_player:
-		_draw_thrusters(1.0 - minf(p / 0.75, 1.0))
+		_draw_thrusters(1.0 - minf(p / 0.75, 1.0), true)
 
 
 # ------------------------------------------------- extinguisher cloud (CrewAnimation::smokeEmitter)
@@ -965,6 +966,16 @@ func _draw_ship() -> void:
 			if w.mount_index < ship.mounts.size():
 				WeaponArt.draw(self, w, ship.mounts[w.mount_index], ship.mount_position(w.mount_index),
 					weapon_slide.get(w, 1.0), 0 if w.is_artillery else wl, mod)
+	# Hangar HIDE ROOMS (ShipManager::bShowRoom false, set from ShipBuilder::bShowRooms): RenderWeapons, then
+	# Ship::OnRenderJump(0) — the hull at alpha 1, a zero-size glare and, on bShowEngines ships, the thrusters at
+	# alpha 1 whatever the engines do. No floor image, rooms, interiors, doors, symbols or crew.
+	drew_interior = false
+	if hide_interior:
+		_blk = {}
+		if hull_tex:
+			draw_texture(hull_tex, hull_pos)
+		_draw_thrusters(1.0, true)
+		return
 	# Ship::OnRenderBase: hull, then the cloak image (while cloaked or fading out), then the player floor image.
 	if hull_tex:
 		draw_texture(hull_tex, hull_pos, Color(1, 1, 1, ship.cloak_alpha()))
@@ -976,9 +987,10 @@ func _draw_ship() -> void:
 	_draw_thrusters(alpha)
 
 	# Interior gate: a cloaked enemy (without player crew aboard) shows only bubble, weapons and hull.
-	if hide_interior or not ship.shows_interior():
+	if not ship.shows_interior():
 		_blk = {}
 		return
+	drew_interior = true
 	_blk = {} if ship.is_destroyed() else ship.blacked_out_rooms()
 
 	# Room floor (Room::OnRenderFloor): flat colour that shifts toward salmon as oxygen drops, then the low-O2
@@ -1087,9 +1099,11 @@ func _draw_explosion() -> void:
 		draw_texture_rect_region(an.texture, Rect2(e.pos, src.size * float(e.scale)), src)
 
 
-## Thrusters (Ship::OnRenderBase): player Kestrel / Federation cruiser only, while the engines give evasion.
-func _draw_thrusters(alpha := 1.0) -> void:
-	if not ship.is_player or ship.is_destroyed() or ship.dodge_factor() == 0:
+## Thrusters (Ship::OnRenderBase): player Kestrel / Federation cruiser only (Ship::bShowEngines, set in
+## Ship::OnInit for kestral* / fed_cruiser*), while the engines give evasion; `always` (Ship::OnRenderJump: jump
+## away, hangar HIDE ROOMS) skips the evasion check.
+func _draw_thrusters(alpha := 1.0, always := false) -> void:
+	if not ship.is_player or ship.is_destroyed() or (ship.dodge_factor() == 0 and not always):
 		return
 	var img: String = ship.blueprint.img
 	for key in THRUSTERS:
@@ -1181,6 +1195,34 @@ func _draw_player_interior(s: SystemState, b: Dictionary, rect: Rect2) -> void:
 	if glow:
 		_draw_rotated(glow, rect.position + lay.pos, Rect2(Vector2.ZERO, glow.get_size()), dir_angle(lay.dir),
 			Color(1, 1, 1, INTERIOR_ALPHA))
+
+
+## What is drawn under the manning slot of a system's room (rules/ship_rendering.md §4), for checks and tests:
+## {kind: "computer" (enemy computer1.png), "interior" (player <img> whose rooms.xml glow sits on a tile),
+## "bare" (player room without `img` or without a glow layout: the exe draws no console, the crew still man it),
+## "" (no console slot), slot (console slot or the glow's tile), dir (lower-case facing)}.
+func console_art(s: SystemState) -> Dictionary:
+	var slot := ship.graph.console_slot(s.room)
+	if slot < 0 or _computer_level(s) < 0:
+		return {"kind": "", "slot": -1, "dir": ""}
+	if not ship.is_player:
+		return {"kind": "computer", "slot": slot, "dir": ship.graph.console_dir(s.room)}
+	var img: String = ship.system_by_id(s.id).get("img", "")
+	var lay := FtlData.room_layout(img) if img != "" else {}
+	var glow := FtlData.texture("img/ship/interior/%s1.png" % lay.name) if not lay.is_empty() else null
+	if glow == null or FtlData.texture("img/ship/interior/" + img + ".png") == null:
+		return {"kind": "bare", "slot": slot, "dir": ship.graph.console_dir(s.room)}
+	return glow_tile(lay, glow.get_size(), ship.graph.room_size(s.room))
+
+
+## Tile (slot) of a room holding the centre of a rooms.xml computerGlow (size `glow` before rotation; LEFT / RIGHT
+## swap its sides) and the glow's facing: where the console of the interior image is drawn.
+static func glow_tile(lay: Dictionary, glow: Vector2, room: Vector2i) -> Dictionary:
+	var dir := String(lay.dir).to_lower()
+	var sz := Vector2(glow.y, glow.x) if dir in ["left", "right"] else glow
+	var c: Vector2 = lay.pos + sz / 2
+	var t := Vector2i(clampi(int(c.x / T), 0, room.x - 1), clampi(int(c.y / T), 0, room.y - 1))
+	return {"kind": "interior", "slot": t.x + t.y * room.x, "dir": dir}
 
 
 ## Console tile of a system's room (top-left) and its rotation (enemy console, hacked console sparks).

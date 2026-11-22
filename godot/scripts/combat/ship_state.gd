@@ -1063,11 +1063,13 @@ func _update_weapon_bonus(s: SystemState) -> void:
 	_set_power(s, weapons_power_used())
 
 
-## Hangar preview (ShipBuilder::OnLoop runs ShipManager::OnLoop on the shown ship): only the crew part matters
-## there — the starting crew stand on their consoles and man them, so they play the typing animation.
+## Hangar preview (ShipBuilder::OnLoop runs ShipManager::OnLoop on the shown ship): the crew part (the starting
+## crew stand on their consoles and man them, so they play the typing animation) and the air (lanius crew drain
+## their rooms to 0 % against the oxygen system's refill: red floors and stripes, as in the vanilla hangar).
 func tick_crew_only(seconds: float) -> void:
 	_tick_crew(seconds)
 	update_manning_boost()
+	env.tick_air(seconds)
 
 
 ## Bodies leave the crew list when the death animation and its fade are over (0.75 s + 1.0 s; crew

@@ -7,7 +7,7 @@ extends Node2D
 ##
 ## CLI (menu): --menu (force the menu), --hangar (open the hangar), --hangar-ship=N|BLUEPRINT (shipId 0..9 or a
 ## blueprint name of the hangar list), --hangar-type=0|1|2, --hangar-difficulty=easy|normal|hard, --hangar-ae=0|1,
-## --hangar-start (press START), --hangar-list[=TYPE] (open the ship list), --menu-options (FTL options window),
+## --hangar-hide-rooms (HIDE ROOMS), --hangar-start (press START), --hangar-list[=TYPE] (open the ship list), --menu-options (FTL options window),
 ## --menu-stats[=L,R] (stats screen pages), --demo-profile (in-memory PlayerProfile.demo(), nothing saved),
 ## --input=pc|touch, --screenshot=<png> [--wait=s], --mute, --debug,
 ## --data-setup (open the first-run "Select ftl.dat" screen even with data; also shown whenever FtlData has none).
@@ -370,6 +370,8 @@ func _handle_cli(args: PackedStringArray) -> void:
 			title.apply(TitleState.make(TitleState.SET_DIFFICULTY, ["easy", "normal", "hard"].find(v)))
 		elif a.begins_with("--hangar-ae="):
 			title.apply(TitleState.make(TitleState.SET_AE, int(v)))
+		elif a == "--hangar-hide-rooms":  # HIDE ROOMS pressed (ShipBuilder::bShowRooms off)
+			title.apply(TitleState.make(TitleState.TOGGLE_ROOMS))
 		elif a == "--hangar-start":
 			start = true
 		elif a.begins_with("--screenshot="):
