@@ -328,6 +328,7 @@ func weapon_stat_groups(bp: Dictionary, ae := true) -> Array:
 			g1 += [T.t("boost_power_damage"), T.f("damage_cap", ItemInfoBox.fmt_float(base + total))]
 		else:
 			g1 += [T.t("boost_power_speed"), T.f("speed_cap", ItemInfoBox.fmt_float(float(bp.cooldown) - total))]
+		g1.append(qt("qol_chain_volleys", int(boost.count)))  # ours: volleys until the cap (boostLevel +1 per volley)
 	if int(bp.get("missiles", 0)) > 0:
 		g1.append(T.t("requires_missiles"))
 	var shots := ItemInfoBox.mini_count(bp) if ty == "BURST" else int(bp.get("shots", 1))

@@ -2,6 +2,7 @@
 <!-- QoL mod texts (our own wording; English). Used by the "Better info" group (rules/tooltips.md §8). -->
 <FTL>
 <text name="qol_stats">Stats:</text>
+<text name="qol_chain_volleys">Cap reached after \1 volleys</text>
 <text name="qol_hull_damage">Base Hull Damage: \1</text>
 <text name="qol_room_damage">Base Damage Per Room: \1</text>
 <text name="qol_ion_damage">Ion Damage: \1</text>
