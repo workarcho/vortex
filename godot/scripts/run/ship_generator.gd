@@ -4,8 +4,8 @@ extends RefCounted
 ## all draws from the ship seed. `generate` returns a plan (pure data); `apply` builds it onto a fresh enemy
 ## ShipState. Parts marked [partial] in the rule follow the rule text (candidate checks inferred).
 ##
-## Plan = {blueprint, s, levels: {sys: level}, max: {sys: max}, crew: [races], automated, weapons: [names],
-##   drones: [names], drone_parts, scrap}
+## Plan = {blueprint, s, levels: {sys: level}, max: {sys: max}, crew: [races], crew_groups: [sizes], automated,
+##   weapons: [names], drones: [names], drone_parts, scrap}
 
 const OFFENSIVE := ["weapons", "drones", "teleporter", "artillery"]
 const DEFENSIVE := ["shields", "engines", "cloaking"]
@@ -30,19 +30,17 @@ static func generate(bp_name: String, level: int, difficulty: int, seed: int, tm
 	var s := level - (1 if easy else 0)
 	var S := maxi(s, 0)
 	var body := FtlData.ship_blueprint_text(bp_name)
-	var plan := {"blueprint": bp_name, "s": s, "levels": {}, "max": {}, "crew": [], "automated": false,
+	var plan := {"blueprint": bp_name, "s": s, "levels": {}, "max": {}, "crew": [], "crew_groups": [], "automated": false,
 		"weapons": [], "drones": [], "drone_parts": 0,
 		"scrap": int(float(t.scrap_mul) * pow(S + 1, float(t.scrap_pow)) + float(t.scrap_add)), "augments_removed": []}
 	if easy and s == -1:
 		plan.augments_removed.append("ENERGY_SHIELD")
-	# Crew: int(min(0.125·S, 1)·(max − amount) + amount); amount 0 → automated.
+	# Crew count: int(min(0.125·S, 1)·(max − amount) + amount). The crew themselves are drawn at the end (after
+	# the drones), where CreateShip adds them.
 	var cc := FtlData.tag_attrs(body, "crewCount")
 	var a := int(cc.get("amount", "0"))
 	var m := int(cc.get("max", str(a)))
-	var n := int(minf(float(t.crew_scale) * S, 1.0) * (m - a) + a)
-	plan.automated = a == 0
-	var races := _crew_races(String(cc.get("class", "human")), n, tmpl, rng, crew_table)
-	plan.crew = races
+	var n := 0 if a == 0 else int(minf(float(t.crew_scale) * S, 1.0) * (m - a) + a)
 	# System maxima (GenerateSystemMaxes) and optional systems.
 	var sys_re := RegEx.create_from_string("<(\\w+)\\s+([^>]*?)/?>")
 	var block := FtlData.tag_value(body, "systemList")
@@ -86,36 +84,73 @@ static func generate(bp_name: String, level: int, difficulty: int, seed: int, tm
 	plan.drone_parts = mini(int(dl.get("drones", "0")) + maxi(s, 0), int(t.drone_parts_cap))
 	if plan.levels.has("drones") and dl.has("load"):
 		_pick_drones(plan, String(dl.load), tmpl, rng, ae)
+	# Crew (after weapons and drones, as in CreateShip): one group per crew entry, each group placed by its own
+	# AddInitialCrew call. Automated = crew count 0 and no <crew> override.
+	var descs := crew_descs(tmpl)
+	plan.automated = n == 0 and descs.is_empty()
+	var groups := _crew_races(String(cc.get("class", "human")), n, descs, rng, crew_table)
+	plan.crew_groups = groups.map(func(g): return g.size())
+	for g in groups:
+		plan.crew.append_array(g)
 	return plan
 
 
-## Class "random" (most pirate blueprints, e.g. FED_BOMBER_P) is never a race: ShipGenerator::GetPossibleCrewList
-## (0x5f9640) answers "random" with BlueprintManager::GetRandomCrew(1) and CreateShip (0x5fca40) calls it again
-## after every crew member it adds, so each such crew member is an independent rarity-weighted race draw.
-static func _crew_races(cls: String, n: int, tmpl: XmlNode, rng: RandomNumberGenerator,
-		crew_table := {}) -> Array:
+## The event <ship>'s <crew> override as CrewDesc entries (EventsParser::ProcessShipEvent 0x5bfc40): every child
+## node of <crew> (whatever its tag), attributes "type" (default "random"; any other attribute such as "class" is
+## ignored, so GHOST_SHIP's `<crewMember class="ghost" prop="2"/>` is type "random"), "prop" (strtof, default 0)
+## and "amount" (atoi, default 0); an entry with prop 0 and amount 0 is dropped. Order kept.
+static func crew_descs(tmpl: XmlNode) -> Array:
 	var out := []
-	var props := []  # [race, proportion]
 	var cnode := tmpl.child("crew") if tmpl != null else null
-	if cnode != null:
-		for c in cnode.children_named("crewMember"):
-			props.append([c.attr("type", "human"), float(c.attr("prop", "1"))])
-	for i in n:
-		if props.is_empty():
-			out.append(random_race(crew_table, rng) if cls == "random" else cls)
-			continue
-		var x := rng.randf()
-		var race: String = props[-1][0]
-		var acc := 0.0
-		for p in props:
-			acc += float(p[1])
-			if x < acc:
-				race = p[0]
-				break
-		if race == "random":
-			race = cls
-		out.append(random_race(crew_table, rng) if race == "random" else race)
+	if cnode == null:
+		return out
+	for c in cnode.children:
+		var prop := float(c.attr("prop", "0"))
+		var amount := int(c.attr("amount", "0"))
+		if prop != 0.0 or amount != 0:
+			out.append({"type": c.attr("type", "random"), "prop": prop, "amount": amount})
 	return out
+
+
+## ShipGenerator::CreateShip (0x5fca40) crew, after the drones. Entries = the <crew> override (`descs`), or, without
+## one and a crew count > 0, a single {type = crewCount class, prop 1}. In entry order:
+##   subCount = amount if prop <= 0; else f = float32(prop × crewCount): 1 if f <= 1.0, else int(f)
+## (no total cap and no normalisation: 0.8 / 0.2 of 6 gives 4 + 1 = 5 crew, every prop > 0 entry gives at least
+## one, also on a crew-count-0 blueprint). Each entry: list = GetPossibleCrewList(type) — "random" answers one
+## GetRandomCrew(1) race (0x5f9640), any other type that race; then while the list is non-empty and subCount > 0:
+## pick random32() % size (always index 0), subCount −1, and GetPossibleCrewList(type) again (a fresh draw for
+## "random", also after the last member). The entry's crew go to one AddInitialCrew call; the room limit (no free
+## slot left) is applied there (ShipState._place_initial_crew). Returns one race array per entry.
+static func _crew_races(cls: String, n: int, descs: Array, rng: RandomNumberGenerator,
+		crew_table := {}) -> Array:
+	var entries := descs
+	if entries.is_empty() and n > 0:
+		entries = [{"type": cls, "prop": 1.0, "amount": 0}]
+	var groups := []
+	for d in entries:
+		var sub := 0
+		var prop: float = d.prop
+		if prop <= 0.0:
+			sub = int(d.amount)
+		else:
+			# float32 product, as the exe computes it (proportion is a float, crewCount converted to float).
+			var f: float = PackedFloat32Array([PackedFloat32Array([prop])[0] * float(n)])[0]
+			sub = 1 if f <= 1.0 else int(f)
+		var group := []
+		var ctype := String(d.type)
+		var race := _possible_crew(ctype, rng, crew_table)
+		while sub > 0:
+			rng.randi()  # random32() % crewList.size(): the list holds one race
+			group.append(race)
+			sub -= 1
+			race = _possible_crew(ctype, rng, crew_table)
+		groups.append(group)
+	return groups
+
+
+## GetPossibleCrewList(type) reduced to its single entry: GetRandomCrew(1) for "random", else the type itself.
+static func _possible_crew(type: String, rng: RandomNumberGenerator, crew_table: Dictionary) -> String:
+	return random_race(crew_table, rng) if type == "random" else type
 
 
 ## GetRandomCrew(1): one rarity-weighted crew race (`table` empty = the crew blueprint rarities); "human" if none.
@@ -259,7 +294,11 @@ static func apply(ship: ShipState, plan: Dictionary) -> void:
 		if c.is_alive() and not c.player_owned:
 			ship.crew.erase(c)
 	ship.blueprint.crew = plan.crew.duplicate()
-	ship._place_initial_crew()
+	# One AddInitialCrew call per crew entry: each group starts again at the head of the system order.
+	var at := 0
+	for size in plan.get("crew_groups", [plan.crew.size()]):
+		ship._place_initial_crew(plan.crew.slice(at, at + int(size)))
+		at += int(size)
 	# Weapons.
 	for w in ship.weapons:
 		ship.depower_weapon(w)

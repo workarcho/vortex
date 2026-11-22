@@ -1162,6 +1162,7 @@ func add_boarders(b: Dictionary) -> int:
 			continue
 		n += 1
 		room = c.room
+		c.boarding_health_limit = -100.0  # BoardingGoal(2): never retreats by health (ShipAI.evac_room)
 		if not breach:
 			ship.teleporting[c] = {"crew": c, "from": null, "to": ship, "room": room, "phase": 1, "t": 0.0,
 				"event": true}

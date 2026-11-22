@@ -189,8 +189,10 @@ func _init(bp_name: String, player: bool) -> void:
 
 ## ShipManager::AddInitialCrew (rules/crew_ai.md "Initial placement"): crew i (blueprint order) goes
 ## to the room of the i-th system of the list below that the ship has (console slot first); crew
-## beyond the list go to a random room.
-func _place_initial_crew() -> void:
+## beyond the list go to a random room. `races`: the crew of one AddInitialCrew call (null = the blueprint crew);
+## ShipGenerator.apply calls it once per <crew> entry, each call starting again at the head of the list.
+func _place_initial_crew(races = null) -> void:
+	var list: Array = blueprint.crew if races == null else races
 	var order := ["pilot"]
 	if is_player:
 		order += ["engines", "weapons", "shields"]
@@ -207,8 +209,8 @@ func _place_initial_crew() -> void:
 		if s and not rooms.has(s.room):
 			rooms.append(s.room)
 	var race_rng: RandomNumberGenerator = null
-	for i in blueprint.crew.size():
-		var race: String = blueprint.crew[i]
+	for i in list.size():
+		var race: String = list[i]
 		if race == "random":
 			# crewCount class="random" (pirate blueprints) on a ship built without ShipGenerator (scenario /
 			# --enemy-ship): one GetRandomCrew(1) draw per crew member, as CreateShip does (ShipGenerator._crew_races).

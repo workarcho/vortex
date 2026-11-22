@@ -147,6 +147,11 @@ var crew_stats := [0, 0, 0, 0, 0]
 ## BoardingGoal targetsDestroyed: crew killed (CrewMember::OnLoop) + systems sabotaged to 0 (UpdateRepair) by this
 ## crew member; read by ACH_BOARDING_DRONE (AchievementTracker).
 var targets_destroyed := 0
+## BoardingGoal fHealthLimit: as an intruder, the HP fraction at or below which the enemy AI pulls it back
+## (CrewAI::ReadyForEvac; ShipAI.evac_room). CrewMember constructor default 0.25; CrewAI::OnInit sets the
+## ship's BoardingGoal(boardingAI) (1: 0.25, 2: -100) on its crew; event boarders get BoardingGoal(2).
+## Not saved (vanilla re-creates crew with the default on load; ShipSave.CREW_SKIP).
+var boarding_health_limit := 0.25
 
 
 func _init(race_id := "human", owned_by_player := true) -> void:

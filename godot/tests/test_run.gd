@@ -298,6 +298,7 @@ func _run() -> void:
 		func(c): return c.race != "random" and real_races.has(c.race)), true)
 	check("pirate crew have sprites", ps.crew.all(func(c): return not FtlData.anim(c.race + "_walk_down").is_empty()),
 		true)
+	_crew_entry_checks()
 
 	# --- escape (rules/combat_ai.md §4): escape event at the threshold, timer while flying → gotaway
 	var re := RunState.new_run(31337)
@@ -722,3 +723,52 @@ func _jump_gates() -> void:
 	check("safe again: full", rh.ship.ftl_charge, 1.0)
 	check("safe: SHIP button usable", [rh.in_danger(), rh.mgmt.can_open(rh)], [false, true])
 	hud.free()
+
+
+## ShipGenerator::CreateShip crew entries (rules/events.md §5.3 "Crew entries" / "Crew per entry"): per entry
+## subCount = amount (prop <= 0) or 1 if prop × crewCount <= 1 else int(prop × crewCount), no total cap.
+func _crew_entry_checks() -> void:
+	print("Crew entries (CreateShip)")
+	var tmpl := XmlNode.parse("""<ship name="T"><crew>
+		<crewMember type="mantis" prop="0.80"/><crewMember type="engi" prop="0.20"/>
+		<other class="ghost" prop="2"/><crewMember type="rock"/><crewMember amount="2" type="slug"/>
+		</crew></ship>""").child("ship")
+	check("  crew_descs: any child, type default random, class ignored, prop 0 + amount 0 dropped",
+		ShipGenerator.crew_descs(tmpl).map(func(d): return [d.type, snappedf(d.prop, 0.01), d.amount]),
+		[["mantis", 0.8, 0], ["engi", 0.2, 0], ["random", 2.0, 0], ["slug", 0.0, 2]])
+	var me := [{"type": "mantis", "prop": 0.8, "amount": 0}, {"type": "engi", "prop": 0.2, "amount": 0}]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 1
+	var sizes := []
+	for n in [3, 5, 6, 8]:
+		sizes.append(ShipGenerator._crew_races("human", n, me, rng).map(func(g): return g.size()))
+	check("  mantis 0.80 / engi 0.20 of 3, 5, 6, 8: int per entry, at least 1, no normalisation", sizes,
+		[[2, 1], [4, 1], [4, 1], [6, 1]])
+	check("  entry races in entry order", ShipGenerator._crew_races("human", 5, me, rng), [["mantis", "mantis",
+		"mantis", "mantis"], ["engi"]])
+	check("  prop > 0 on crewCount 0 still gives 1; amount entry gives amount", ShipGenerator._crew_races("human", 0,
+		[{"type": "rock", "prop": 0.5, "amount": 0}, {"type": "slug", "prop": 0.0, "amount": 2},
+		{"type": "engi", "prop": -1.0, "amount": 0}], rng), [["rock"], ["slug", "slug"], []])
+	check("  float32 product: 0.7 of 10 -> 7", ShipGenerator._crew_races("human", 10,
+		[{"type": "human", "prop": 0.7, "amount": 0}], rng)[0].size(), 7)
+	check("  no override: one {class, 1} entry; none at crewCount 0", [ShipGenerator._crew_races("zoltan", 4, [],
+		rng), ShipGenerator._crew_races("zoltan", 0, [], rng)], [[["zoltan", "zoltan", "zoltan", "zoltan"]], []])
+	var real_races: Dictionary = EventDB.shared().rarity.crew
+	var rnd: Array = ShipGenerator._crew_races("human", 4, [{"type": "random", "prop": 2.0, "amount": 0}], rng)[0]
+	check("  type random (GHOST_SHIP prop 2): 8 independent real races", [rnd.size(), rnd.all(
+		func(rc): return rc != "random" and real_races.has(rc))], [8, true])
+	# Full plan: MANTIS_FIGHTER (3..5) at sector 8 -> crewCount 4: mantis int(3.2) = 3, engi 0.8 -> 1.
+	var me_tmpl := XmlNode.parse("""<ship name="T"><crew><crewMember type="mantis" prop="0.80"/>
+		<crewMember type="engi" prop="0.20"/></crew></ship>""").child("ship")
+	var mp := ShipGenerator.generate("MANTIS_FIGHTER", 7, EventEngine.Difficulty.NORMAL, 21, me_tmpl)
+	check("  plan: groups [3, 1], races", [mp.crew_groups, mp.crew], [[3, 1], ["mantis", "mantis", "mantis", "engi"]])
+	var ms := ShipState.new("MANTIS_FIGHTER", false)
+	ShipGenerator.apply(ms, mp)
+	check("  applied: one AddInitialCrew per entry, 4 crew", [ms.own_crew().size(),
+		ms.own_crew().filter(func(c): return c.race == "engi").size()], [4, 1])
+	var ab := ShipGenerator.generate("AUTO_BASIC", 2, EventEngine.Difficulty.NORMAL, 3)
+	var human1 := XmlNode.parse("""<ship name="T"><crew><crewMember type="human" prop="1"/></crew></ship>""").child(
+		"ship")
+	var abc := ShipGenerator.generate("AUTO_BASIC", 2, EventEngine.Difficulty.NORMAL, 3, human1)
+	check("  automated = crewCount 0 and no override", [ab.automated, ab.crew, abc.automated, abc.crew],
+		[true, [], false, ["human"]])

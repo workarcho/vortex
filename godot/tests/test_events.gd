@@ -249,6 +249,7 @@ func _boarder_checks(r: RunState) -> void:
 	Combat._update_event_arrivals(r.ship, 0.3)
 	check("arrived after 0.5 s -> intruder alarm", [r.ship.teleporting.has(b[0]),
 		CommandHud.intruders_arrived(r.ship)], [false, true])
+	_later_beacon_checks(r)
 	var br := ShipState.new("PLAYER_SHIP_HARD", true)
 	r.ship = br
 	check("breach boarder placed", r.add_boarders({"amount": 1, "race": "anaerobic", "breach": true}), 1)
@@ -275,6 +276,68 @@ func _boarder_checks(r: RunState) -> void:
 	check("ghost boarders: 50 HP", r.ship.intruders().map(func(c): return c.max_hp), [50.0, 50.0])
 	check("choice outcome environment starts the hazard", r.hazard != null and r.hazard.env == 1, true)
 	r.hazard = null
+
+
+## Event boarders at a later beacon (rules/events.md "Ownership and later beacons", crew_ai.md "Retreat"): they are
+## enemy-side intruders like any other, but CrewAI::ReadyForEvac tests each intruder's OWN boardingGoal.fHealthLimit
+## (event boarders: BoardingGoal(2) = -100), so a new enemy with a teleporter pulls them back only on a forced
+## evacuation (RequiredEvac), never because they are hurt.
+func _later_beacon_checks(r: RunState) -> void:
+	print("Event boarders at a later beacon")
+	var ps: ShipState = r.ship
+	var eb: Array = ps.intruders()
+	check("  event boarders: BoardingGoal(2) limit -100", eb.map(func(c): return c.boarding_health_limit),
+		[-100.0, -100.0])
+	check("  crew default fHealthLimit 0.25 (CrewMember constructor)", CrewMember.new("human", false)
+		.boarding_health_limit, 0.25)
+	# The next beacon's enemy: sabotage AI with a teleporter (CrewAI::OnInit gives its crew BoardingGoal(1)).
+	var es := ShipState.new("MANTIS_FIGHTER", false)
+	es.crew[0].boarding_health_limit = -5.0
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 3
+	var ai := ShipAI.new(es, rng)
+	check("  sabotage ship: CrewAI::OnInit sets its crew to 0.25", es.crew[0].boarding_health_limit, 0.25)
+	var fb := ShipState.new("FED_BOMBER", false)
+	fb.crew[0].boarding_health_limit = -5.0
+	var _fb_ai := ShipAI.new(fb, rng)
+	check("  boardingAI 0: crew keep their goal", fb.crew[0].boarding_health_limit, -5.0)
+	ai.target = ps
+	es.opponent = ps
+	ps.opponent = es
+	for c in eb:
+		c.hp = c.max_hp * 0.1
+	check("  hurt event boarders: no retreat room", ShipAI.evac_room(ps, false), -1)
+	ai.update_boarding()
+	check("  new enemy does not retrieve hurt event boarders", ai.teleport_request >= 0, true)
+	check("  ... and GetTeleportCommand does not retrieve", ai.get_teleport_command().get("mode", -1)
+		!= TeleporterRule.RETRIEVE, true)
+	# One of the new ship's own boarders (limit 0.25) at 20 % HP in another room is pulled back from its room.
+	var other := -1
+	for rm in ps.layout.rooms:
+		if rm.id != eb[0].room:
+			other = rm.id
+			break
+	var own := ps.add_crew("mantis", false, other)
+	own.boarding_health_limit = 0.25
+	own.hp = own.max_hp * 0.2
+	check("  its own hurt boarder: retreat from that room", ShipAI.evac_room(ps, false), own.room)
+	ai.update_boarding()
+	check("  evac request -1 at that room", [ai.teleport_request, ai.teleport_target], [-1, own.room])
+	ps.crew.erase(own)
+	# Forced evacuation (surrender): the first intruder in the crew list, the event boarders included.
+	ai.teleport_request = 0
+	ai.surrendered = true
+	check("  forced (RequiredEvac): first intruder's room", ShipAI.evac_room(ps, ai.required_evac()), eb[0].room)
+	ai.update_boarding()
+	check("  surrendered enemy retrieves from the event boarders' room", [ai.teleport_request, ai.teleport_target],
+		[-1, eb[0].room])
+	ai.surrendered = false
+	ai.teleport_request = 0
+	check("  limit not saved (reload: constructor default)", ShipSave.crew_snapshot(eb[0]).p.has(
+		"boarding_health_limit"), false)
+	for c in eb:
+		c.hp = c.max_hp
+	ps.opponent = null
 
 
 ## Event reward box items (ChoiceBox::RenderResources): weapon / drone / augment icon + name, alert line.

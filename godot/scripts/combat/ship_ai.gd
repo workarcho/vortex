@@ -80,6 +80,11 @@ func _init(s: ShipState, random: RandomNumberGenerator) -> void:
 	boarding_ai = 1 if bai == "sabotage" else (2 if bai == "invasion" else 0)
 	var n: int = ship.blueprint.get("crew", []).size()
 	crew_needed = n - [0, n / 2, (3 * n) / 4][boarding_ai]
+	# CrewAI::OnInit (0x6017d0): with boardingAI != 0, every crew member aboard (GetCrewList) gets
+	# BoardingGoal(boardingAI); with 0 they keep the CrewMember default (fHealthLimit 0.25).
+	if boarding_ai != 0:
+		for c in ship.crew:
+			c.boarding_health_limit = BOARD_HEALTH_LIMIT[boarding_ai]
 
 
 ## ShipAI::OnLoop, after the ship's own simulation step. `seconds` = game seconds of this frame.
@@ -111,23 +116,37 @@ func update_cloak() -> void:
 # ------------------------------------------------------------ boarding (section 5)
 
 ## Boarding request bookkeeping (ShipAI::OnLoop): while it has boarded fewer than 2 times, request
-## max(0, crew aboard - iCrewNeeded); evacuation when required or when a boarder is hurt below the
-## boarding goal's health limit. Passed to the crew AI (no Zoltan super shields are modelled).
+## max(0, crew aboard - iCrewNeeded); evacuation request from `evac_room` (WorldManager::OnLoop:
+## SetEvacRequest(other ship's CrewAI::ReadyForEvac(RequiredEvac()))). Passed to the crew AI (no Zoltan
+## super shields are modelled).
 func update_boarding() -> void:
 	if ship.sys("teleporter") == null:
 		return
 	if times_teleported < MAX_BOARDINGS and teleport_request >= 0:
 		teleport_request = maxi(0, ship.own_crew().size() - crew_needed)
-	if target != null and boarding_ai > 0:
-		var limit: float = BOARD_HEALTH_LIMIT[boarding_ai]
-		var evac := required_evac()
-		for c in target.crew:
-			if c.is_alive() and c.player_owned == ship.is_player and (evac or c.hp / c.max_hp <= limit):
-				teleport_request = -1
-				teleport_target = c.room
-				break
+	if target != null:
+		var room := evac_room(target, required_evac())
+		if room != -1:
+			teleport_request = -1
+			teleport_target = room
 	if crew_ai:
 		crew_ai.set_teleport_request(teleport_request)
+
+
+## CrewAI::ReadyForEvac(force) (0x601ab0) of the ship `on` (the player's CrewAI, whose list is every crew
+## member aboard the player ship, in crew-list order): the room of the first non-drone intruder there whose
+## HP fraction is <= its own boardingGoal.fHealthLimit (`boarding_health_limit`), or of the first intruder at
+## all when `force`; -1 if none. It does not ask which ship sent the intruder: every intruder is enemy-side
+## crew (iShipId 1), so event boarders (BoardingGoal(2), limit -100: never by health) and the boarders of an
+## earlier ship are retrieved only by a forced evacuation (RequiredEvac) of the current ship. Dead intruders
+## still in their death animation are not skipped (their HP fraction 0 is <= a 0.25 limit).
+static func evac_room(on: ShipState, force: bool) -> int:
+	for c in on.crew:
+		if c.is_drone() or not c.is_intruder(on):
+			continue
+		if force or c.hp / c.max_hp <= c.boarding_health_limit:
+			return c.room
+	return -1
 
 
 ## RequiredEvac: boardingAI 1 and (escaping with < 15 s left, or > 2 destroyed systems), or surrendered.
