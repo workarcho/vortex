@@ -392,6 +392,45 @@ func _test_screen_shake() -> void:
 	check("an ASB shot queues the shake (UpdatePDS)", hz.pds_shots > 0 and hz.screen_shake_queued, true)
 	sk._process(0.0)
 	check("  read once: timer >= 0.05, flag cleared", [sk.timer >= 0.05, hz.screen_shake_queued], [true, false])
+	# The TARGET frame layer (main.gd adds enemy_window_back to hud_root BEFORE its setup) must cover the frame: a
+	# Control is culled by its own size rect, and a 0 × 0 layer at (0, 0) vanished whenever the shake offset had a
+	# negative axis (the frame flickered off while the enemy ship and status kept drawing).
+	var hud := Control.new()
+	hud.size = HudLayout.FRAME
+	add_child(hud)
+	var back := EnemyWindow.new()
+	hud.add_child(back)
+	back.setup(en, me, false)
+	var front := EnemyWindow.new()
+	front.setup(en, me, true)
+	hud.add_child(front)
+	check("frame layer set up in the tree: full frame size", [back.position, back.size], [Vector2.ZERO,
+		HudLayout.FRAME])
+	check("status layer set up before the tree: full frame size", front.size, HudLayout.FRAME)
+	var space := Control.new()  # stands for the enemy Space container (its clip rect is container-local)
+	space.position = Vector2(882, 54)
+	space.size = Vector2(380, 529)
+	hud.add_child(space)
+	sk.setup(null, func() -> Array: return [back, space, front])
+	var screen := Rect2(Vector2.ZERO, HudLayout.FRAME)
+	var together := true
+	var visible_rect := true
+	for off in [Vector2(-3, -3), Vector2(2, -3), Vector2(-3, 2), Vector2(2, 2)]:
+		sk.timer = 0.3
+		sk.current = off
+		sk.apply()
+		together = together and back.position == off and front.position == off \
+			and space.position == Vector2(882, 54) + off
+		visible_rect = visible_rect and Rect2(back.position, back.size).intersects(screen)
+	check("frame, status and ship view move together by the offset", together, true)
+	check("  the frame's visibility rect stays on screen at every offset", visible_rect, true)
+	sk.current = Vector2.ZERO
+	sk.desired = Vector2.ZERO
+	sk.timer = 0.0
+	sk.apply()
+	check("  shake over: all at rest, sizes unchanged", [back.position, front.position, space.position, back.size],
+		[Vector2.ZERO, Vector2.ZERO, Vector2(882, 54), HudLayout.FRAME])
+	hud.queue_free()
 	holder.queue_free()
 	sk.free()
 

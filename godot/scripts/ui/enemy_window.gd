@@ -40,7 +40,11 @@ func setup(e: ShipState, p: ShipState, is_front: bool) -> void:
 	enemy = e
 	player = p
 	front = is_front
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	# Anchors AND offsets: set_anchors_preset alone on a node already in the tree (the back layer is added before
+	# its setup) keeps the old 0 × 0 rect. A Control's visibility (culling) rect is its own size rect, so a 0 × 0
+	# frame layer is culled as soon as the screen shake moves its origin off-screen (rules/hud_layout.md "Screen
+	# shake": the TARGET frame vanished while the ship, status and system boxes kept drawing).
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 

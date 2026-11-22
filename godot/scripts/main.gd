@@ -4118,6 +4118,17 @@ func _handle_cli() -> void:
 				scheduled.append([float(v[1]), act])
 			else:
 				act.call()
+		elif a.begins_with("--hull-damage="):
+			# --hull-damage=me|enemy:N[@S]: N hull damage through ShipState.take_hull_damage at once or after S s
+			# (records iLastDamage: the player's hull damage starts the screen shake, rules/hud_layout.md)
+			var v := a.trim_prefix("--hull-damage=").split("@")
+			var p := v[0].split(":")
+			var ship := enemy_space.ship if p[0] == "enemy" else player_space.ship
+			var act := func(): ship.take_hull_damage(int(p[1]))
+			if v.size() > 1:
+				scheduled.append([float(v[1]), act])
+			else:
+				act.call()
 		elif a == "--debug":
 			if not debug_visible:
 				toggle_debug()
