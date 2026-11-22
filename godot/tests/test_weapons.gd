@@ -687,12 +687,24 @@ func test_enemy_generation() -> void:
 	check("never more power than the system", over, 0)
 	check("2-bar Auto-Scouts carry two 1-power weapons", two_basic > 0, true)
 	check("Leto (MISSILES_1) is a common sector-1 pick", leto > 40, true)
-	var none := 0
-	for seed in 100:
-		var plan := ShipGenerator.generate("AUTO_ASSAULT", 0, EventEngine.Difficulty.EASY, seed)
-		if int(plan.levels.weapons) == 0 and plan.weapons.is_empty():
-			none += 1
-	check("AUTO_ASSAULT left at 0 weapon bars: no weapon (no fallback)", none, 100)
+	print("ShipManager::AddSystem: a system starts at max(power, 1) bars (AUTO_ASSAULT <weapons power=\"0\">)")
+	var zero_bar := 0
+	var unarmed := 0
+	for seed in 60:
+		for diff in [EventEngine.Difficulty.EASY, EventEngine.Difficulty.NORMAL]:
+			var plan := ShipGenerator.generate("AUTO_ASSAULT", seed % 3, diff, seed)
+			if int(plan.levels.weapons) < 1:
+				zero_bar += 1
+			if plan.weapons.is_empty():
+				unarmed += 1
+	check("AUTO_ASSAULT sectors 1-3: never a 0-bar weapons system", zero_bar, 0)
+	check("AUTO_ASSAULT sectors 1-3: a 1-power weapon always fits the 1st bar (never unarmed)", unarmed, 0)
+	check("start_level: power 0 -> 1, 2 -> 2, capped by the system max (pilot 3)", [ShipGenerator.start_level("weapons", 0),
+		ShipGenerator.start_level("shields", 2), ShipGenerator.start_level("pilot", 9)], [1, 2, 3])
+	check("ShipState (no generator) builds AUTO_ASSAULT weapons at 1 bar", ShipState.new("AUTO_ASSAULT", false).sys("weapons").level, 1)
+	var ws := SystemState.new("weapons", 0, 1)
+	check("RenderSystemSymbol: intact unpowered system grey (red only at health 0)", [ws.symbol_color(0.0),
+		SystemState.new("weapons", 0, 0).symbol_color(0.0)], ["grey", "red"])
 	print("Automated ship (bAutomated): every boostable, intact system counts as manned by an unskilled crew")
 	var a := ShipState.new("AUTO_BASIC", false)
 	ShipGenerator.apply(a, ShipGenerator.generate("AUTO_BASIC", 0, EventEngine.Difficulty.NORMAL, 11))

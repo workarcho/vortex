@@ -159,7 +159,8 @@ func _init(bp_name: String, player: bool) -> void:
 
 	for s in blueprint.systems:
 		if s.start:
-			systems[s.id] = SystemState.new(s.id, s.room, s.power)
+			# ShipManager::AddSystem 0x0049ca00: max(power, 1) bars (AUTO_ASSAULT <weapons power="0"> -> 1 bar).
+			systems[s.id] = SystemState.new(s.id, s.room, ShipGenerator.start_level(s.id, int(s.power)))
 	env = ShipEnvironment.new(self)
 	graph = ShipGraph.new(self)
 
@@ -402,7 +403,7 @@ func _load_weapons() -> void:
 				if not w.is_empty() and w.type == "LASER" and w.power <= ws_sys.level:
 					names.append(n)
 					break
-			# None fits (e.g. weapons level 0, as on AUTO_ASSAULT): take the cheapest weapon of the
+			# None fits (a weapons level below every weapon's power): take the cheapest weapon of the
 			# list and raise the weapons level to its power, so every test enemy can shoot.
 			if names.is_empty():
 				var best := {}

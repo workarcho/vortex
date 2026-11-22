@@ -63,8 +63,11 @@ static func generate(bp_name: String, level: int, difficulty: int, seed: int, tm
 				added_offensive = true
 			else:
 				added_other += 1
+		# GenerateSystemMaxes (0x5fbe90) works from the blueprint power p (0 allowed), but the system itself is
+		# created by ShipManager::AddSystem (0x0049ca00), which starts it at max(p, 1) bars (+ shipLevel 0,
+		# capped by the system blueprint's max): AUTO_ASSAULT's <weapons power="0"> is a 1-bar weapons system.
 		var mx := clampi(int(float(t.level_scale) * s * (M - p) + p) + int(rng.randi() % k), p, M)
-		plan.levels[id] = p
+		plan.levels[id] = start_level(id, p)
 		plan.max[id] = mx
 	# Upgrade budgets: A = S+1, B = s+2, C = S/3+1 (hard +2); added systems cost A−1 / C−2 (hard C−1).
 	var A := S + 1
@@ -160,6 +163,14 @@ static func random_race(table: Dictionary, rng: RandomNumberGenerator) -> String
 	return race if race != "" else "human"
 
 
+## ShipManager::AddSystem (0x0049ca00): a new system starts at max(blueprint power, 1) + shipLevel (0 for every
+## ship built here and by ShipManager::OnInit(bp, 0)), capped by the system blueprint's <maxPower>.
+static func start_level(id: String, power: int) -> int:
+	var lvl := maxi(power, 1)
+	var cap := int(UpgradeSession.system_info(id).max)
+	return mini(lvl, cap) if cap > 0 else lvl
+
+
 ## `count` random +1 upgrades among systems accepted by `ok` that are below their generated max.
 static func _upgrade(plan: Dictionary, count: int, ok: Callable, rng: RandomNumberGenerator) -> void:
 	for i in count:
@@ -244,8 +255,8 @@ static func _pick_weapons(plan: Dictionary, body: String, tmpl: XmlNode, rng: Ra
 		names.append(pick)
 		used += int(bps[pick].power)
 		flags &= ~weapon_flags(bps[pick])
-	# CreateShip picks until the list is empty, with no fallback: a weapons system with no fitting weapon (e.g.
-	# AUTO_ASSAULT left at 0-1 bars) stays empty.
+	# CreateShip picks until the list is empty, with no fallback: a weapons system with no fitting weapon stays
+	# empty (rare in vanilla data: every system has at least 1 bar and most lists hold 1-power weapons).
 	plan.weapons = names
 
 
