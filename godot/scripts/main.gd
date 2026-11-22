@@ -327,6 +327,8 @@ func _run_cli_partb(a: String, p: InputProfile) -> void:
 			print("give crew %s: %d crew" % [nm, run.ship.own_crew().size()])
 		else:
 			print("give %s %s: %s" % [kind, nm, str(run.give_item(kind, nm))])
+	elif a == "--loaded":
+		_debug_loaded()
 	elif a == "--distress":
 		run.apply(RunIntent.make(RunIntent.TOGGLE_DISTRESS))
 	elif a.begins_with("--end="):
@@ -334,6 +336,46 @@ func _run_cli_partb(a: String, p: InputProfile) -> void:
 			run.game_over(v)
 		else:
 			run.end_run(v, "Debug end of run.")
+
+
+## --loaded (run mode, e.g. with --last-stand / --boss-stage): a late-game ship for testing — every system the
+## layout has room for (clonebay / artillery excepted) at its maximum, reactor maxed, full hull, a strong
+## weapon / drone loadout, 8 crew, plenty of resources, everything powered.
+const LOADED_WEAPONS := ["LASER_BURST_3", "BEAM_2", "ION_2", "LASER_BURST_2"]
+const LOADED_DRONES := ["DEFENSE_2", "COMBAT_2"]
+const LOADED_CREW := ["human", "engi", "mantis", "rock", "energy", "slug", "crystal", "anaerobic"]
+
+
+func _debug_loaded() -> void:
+	var s := run.ship
+	for id in SystemState.ORDER:
+		if id != "clonebay" and id != "artillery" and s.sys(id) == null:
+			run.install_system(id)
+	s.reactor_max = UpgradeSession.REACTOR_MAX
+	for id in SystemState.ORDER:
+		var sy := s.sys(id)
+		if sy != null:
+			sy.level = maxi(sy.level, UpgradeSession.max_level(s, id))
+			sy.damage = 0
+	s.hull = s.max_hull
+	_replace_weapons(s, LOADED_WEAPONS)
+	_replace_drones(s, LOADED_DRONES)
+	var crew := s.own_crew().size()
+	for i in range(crew, LOADED_CREW.size()):
+		s.add_crew(LOADED_CREW[i], true)
+	s.scrap = 999
+	s.fuel = 30
+	s.missiles = 30
+	s.drone_parts = 30
+	for id in SystemState.ORDER:
+		if id != "weapons" and id != "drones" and s.sys(id) != null:
+			for i in 8:
+				if s.increase_power(id, true) != "":
+					break
+	for w in s.weapons:
+		s.try_power_weapon(w)
+	print("loaded: reactor %d, %d crew, weapons %s" % [s.reactor_max, s.own_crew().size(),
+		str(s.weapons.map(func(w): return w.bp.get("name", "?")))])
 
 
 func _debug_close_dialogs() -> void:
