@@ -18,8 +18,10 @@ static func _t() -> Dictionary:
 ## `tmpl`: the event's <ship> template (weaponOverride / droneOverride / crew); may be null.
 ## `ae`: Advanced Edition content on — the weapon / drone pools then use the OVERRIDE_ lists
 ## (BlueprintManager::GetBlueprintList, FtlData.blueprint_list_ae).
+## `crew_table`: crew race -> rarity for class "random" (GetRandomCrew; the sector rarityList applied, see
+## EventEngine.crew_rarity_table); empty = the blueprint rarities.
 static func generate(bp_name: String, level: int, difficulty: int, seed: int, tmpl: XmlNode = null,
-		ae := true) -> Dictionary:
+		ae := true, crew_table := {}) -> Dictionary:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed
 	var t := _t()
@@ -39,7 +41,7 @@ static func generate(bp_name: String, level: int, difficulty: int, seed: int, tm
 	var m := int(cc.get("max", str(a)))
 	var n := int(minf(float(t.crew_scale) * S, 1.0) * (m - a) + a)
 	plan.automated = a == 0
-	var races := _crew_races(String(cc.get("class", "human")), n, tmpl, rng)
+	var races := _crew_races(String(cc.get("class", "human")), n, tmpl, rng, crew_table)
 	plan.crew = races
 	# System maxima (GenerateSystemMaxes) and optional systems.
 	var sys_re := RegEx.create_from_string("<(\\w+)\\s+([^>]*?)/?>")
@@ -87,7 +89,11 @@ static func generate(bp_name: String, level: int, difficulty: int, seed: int, tm
 	return plan
 
 
-static func _crew_races(cls: String, n: int, tmpl: XmlNode, rng: RandomNumberGenerator) -> Array:
+## Class "random" (most pirate blueprints, e.g. FED_BOMBER_P) is never a race: ShipGenerator::GetPossibleCrewList
+## (0x5f9640) answers "random" with BlueprintManager::GetRandomCrew(1) and CreateShip (0x5fca40) calls it again
+## after every crew member it adds, so each such crew member is an independent rarity-weighted race draw.
+static func _crew_races(cls: String, n: int, tmpl: XmlNode, rng: RandomNumberGenerator,
+		crew_table := {}) -> Array:
 	var out := []
 	var props := []  # [race, proportion]
 	var cnode := tmpl.child("crew") if tmpl != null else null
@@ -96,7 +102,7 @@ static func _crew_races(cls: String, n: int, tmpl: XmlNode, rng: RandomNumberGen
 			props.append([c.attr("type", "human"), float(c.attr("prop", "1"))])
 	for i in n:
 		if props.is_empty():
-			out.append(cls)
+			out.append(random_race(crew_table, rng) if cls == "random" else cls)
 			continue
 		var x := rng.randf()
 		var race: String = props[-1][0]
@@ -106,8 +112,17 @@ static func _crew_races(cls: String, n: int, tmpl: XmlNode, rng: RandomNumberGen
 			if x < acc:
 				race = p[0]
 				break
-		out.append(race if race != "random" else cls)
+		if race == "random":
+			race = cls
+		out.append(random_race(crew_table, rng) if race == "random" else race)
 	return out
+
+
+## GetRandomCrew(1): one rarity-weighted crew race (`table` empty = the crew blueprint rarities); "human" if none.
+static func random_race(table: Dictionary, rng: RandomNumberGenerator) -> String:
+	var t: Dictionary = table if not table.is_empty() else EventDB.shared().rarity.get("crew", {})
+	var race := RunStore.pick_weighted(t, rng)
+	return race if race != "" else "human"
 
 
 ## `count` random +1 upgrades among systems accepted by `ok` that are below their generated max.

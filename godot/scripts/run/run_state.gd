@@ -1400,7 +1400,7 @@ static func apply_status_to(s_ship: ShipState, st: Dictionary) -> void:
 func _spawn_enemy(ship_ev: Dictionary) -> void:
 	var setup := engine.setup_ship(ship_ev)
 	var plan := ShipGenerator.generate(setup.blueprint, sector, engine.difficulty, int(ship_ev.seed), ship_ev.node,
-		engine.ae)
+		engine.ae, engine.crew_rarity_table())
 	enemy = {"ship_ev": ship_ev, "blueprint": setup.blueprint, "plan": plan, "hostile": bool(ship_ev.hostile),
 		"surrendered": false, "done": false, "outcome": "", "has_surrender": setup.has_surrender,
 		"surrender_threshold": setup.surrender_threshold, "escape_threshold": setup.escape_threshold,

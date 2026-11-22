@@ -432,11 +432,16 @@ func random_item(kind: String) -> String:
 
 ## GetRandomCrew: same weighting over crew races, sector rarityList overrides applied.
 func random_crew() -> String:
+	var pick := _weighted(crew_rarity_table())
+	return pick if pick != "" else "human"
+
+
+## Crew race -> rarity used by GetRandomCrew: blueprint rarities with the sector rarityList overrides.
+func crew_rarity_table() -> Dictionary:
 	var table: Dictionary = db.rarity.get("crew", {}).duplicate()
 	for k in crew_rarity:
 		table[k] = crew_rarity[k]
-	var pick := _weighted(table)
-	return pick if pick != "" else "human"
+	return table
 
 
 func _weighted(table: Dictionary) -> String:

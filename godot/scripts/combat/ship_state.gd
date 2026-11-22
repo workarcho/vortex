@@ -206,8 +206,17 @@ func _place_initial_crew() -> void:
 		# One artillery system at most here, so later artillery entries are dropped.
 		if s and not rooms.has(s.room):
 			rooms.append(s.room)
+	var race_rng: RandomNumberGenerator = null
 	for i in blueprint.crew.size():
-		var c := CrewMember.new(blueprint.crew[i], is_player)
+		var race: String = blueprint.crew[i]
+		if race == "random":
+			# crewCount class="random" (pirate blueprints) on a ship built without ShipGenerator (scenario /
+			# --enemy-ship): one GetRandomCrew(1) draw per crew member, as CreateShip does (ShipGenerator._crew_races).
+			if race_rng == null:
+				race_rng = RandomNumberGenerator.new()
+				race_rng.randomize()
+			race = ShipGenerator.random_race({}, race_rng)
+		var c := CrewMember.new(race, is_player)
 		var room: int = rooms[i] if i < rooms.size() else -1
 		var slot := graph.find_slot(room, c) if room >= 0 else -1
 		if slot < 0:

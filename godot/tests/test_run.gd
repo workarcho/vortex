@@ -275,6 +275,29 @@ func _run() -> void:
 	ShipGenerator.apply(gs, g7)
 	check("plan applied (crew, weapons)", [gs.own_crew().size(), gs.weapons.size()], [4, g7.weapons.size()])
 	check("enemy reactor powers its systems", gs.reactor_used() <= gs.reactor_capacity(), true)
+	# crewCount class="random" (pirate blueprints): GetPossibleCrewList answers GetRandomCrew(1) per crew member, so
+	# every crew member is a real, rarity-weighted race (never the literal "random", which has no sprites and was
+	# drawn as a placeholder blob) and the races vary.
+	var real_races: Dictionary = EventDB.shared().rarity.crew
+	var pirate_races := {}
+	var all_real := true
+	for sd in 40:
+		var pp := ShipGenerator.generate("FED_BOMBER_P", 4, EventEngine.Difficulty.NORMAL, sd)
+		for race in pp.crew:
+			pirate_races[race] = true
+			if not real_races.has(race) or int(real_races[race]) <= 0:
+				all_real = false
+	check("class random: every crew member a rarity-weighted race", [all_real, pirate_races.has("random")],
+		[true, false])
+	check("class random: races vary (%s)" % str(pirate_races.keys()), pirate_races.size() >= 3, true)
+	check("class random honours the crew table (sector rarityList)",
+		ShipGenerator.generate("FED_BOMBER_P", 4, 1, 5, null, true, {"rock": 1, "human": 0}).crew.all(
+			func(rc): return rc == "rock"), true)
+	var ps := ShipState.new("FED_BOMBER_P", false)
+	check("scenario ship (no generator): class random resolved", ps.crew.all(
+		func(c): return c.race != "random" and real_races.has(c.race)), true)
+	check("pirate crew have sprites", ps.crew.all(func(c): return not FtlData.anim(c.race + "_walk_down").is_empty()),
+		true)
 
 	# --- escape (rules/combat_ai.md §4): escape event at the threshold, timer while flying → gotaway
 	var re := RunState.new_run(31337)
