@@ -72,7 +72,7 @@ var _primary_cache := {}  # room_id -> [system id, slot, dir]
 ## per system and enemy ships pilot slot 0 facing up / artillery slot 0 up / Ship::ChoosePrimarySlot.
 func _primary(room_id: int) -> Array:
 	var s := ship.system_in_room(room_id)
-	if s == null or OBSTRUCTION_SYSTEMS.has(s.id) or not CONSOLE_SYSTEMS.has(s.id) 			or (s.id == "artillery" and ship.is_player):
+	if s == null or OBSTRUCTION_SYSTEMS.has(s.id) or not CONSOLE_SYSTEMS.has(s.id) 			or (s.id == "artillery" and ship.player_art()):
 		return [-1, ""]
 	var c: Array = _primary_cache.get(room_id, [])
 	if not c.is_empty() and c[0] == s.id:
@@ -81,7 +81,7 @@ func _primary(room_id: int) -> Array:
 	var slot: int = bp.get("slot", -1)
 	var dir: String = bp.get("slot_dir", "")
 	if slot < 0:
-		if ship.is_player:
+		if ship.player_art():
 			var d: Array = PLAYER_CONSOLE_DEFAULTS.get(s.id, [0, ""])
 			slot = d[0]
 			dir = d[1]
@@ -145,7 +145,7 @@ func blocked_slot(room_id: int) -> int:
 	if s == null or not OBSTRUCTION_SYSTEMS.has(s.id):
 		return -1
 	var slot: int = ship.system_by_id(s.id).get("slot", -1)
-	if slot == -1 and ship.is_player:
+	if slot == -1 and ship.player_art():
 		slot = 1  # AddSystem: player medbay / clonebay without <slot> block tile 1 (-2 = none)
 	return slot if slot < slot_count(room_id) else -1
 

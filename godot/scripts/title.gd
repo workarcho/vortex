@@ -15,6 +15,8 @@ extends Node2D
 const MAIN_SCENE := "res://main.tscn"
 ## First-run data setup: shown instead of everything else while FtlData has no usable data folder.
 const DATA_SETUP_SCENE := "res://data_setup.tscn"
+## `--autobattle`: the AI-vs-AI screensaver demo (scripts/autobattle/autobattle.gd), straight from the command line.
+const AUTOBATTLE_SCENE := "res://autobattle.tscn"
 const Main := preload("res://scripts/main.gd")
 ## Touch UI, non-16:9 screens: parts of main_base2.png that must not show mirrored in the bands around the centred
 ## title frame (FrameFill / MirroredBackground.draw_mirrored `hide`): [part, clean stars drawn over it]. The FTL
@@ -72,6 +74,9 @@ func _ready() -> void:
 	if FtlData.root == "" or force_setup:  # no ftl-data: ask for the player's ftl.dat first (scripts/ui/data_setup.gd)
 		_setup_forced = true
 		FrameHost.change_scene(get_tree(), DATA_SETUP_SCENE)
+		return
+	if args.has("--autobattle"):
+		FrameHost.change_scene(get_tree(), AUTOBATTLE_SCENE)
 		return
 	if skips_menu(args):
 		FrameHost.change_scene(get_tree(), MAIN_SCENE)

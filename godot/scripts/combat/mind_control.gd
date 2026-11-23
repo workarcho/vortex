@@ -273,7 +273,7 @@ static func ai_update(ship: ShipState, hostile: bool) -> void:
 		if ship.mind_in_use:
 			release(ship)
 		return
-	if ship.is_player and not m.hacked:
+	if ship.is_player and not m.hacked and not ship.ai_driven:  # autobattle: an AI-driven player side uses it too
 		return
 	if not can_use(ship) or ship.mind_in_use or m.ion != 0:
 		return

@@ -58,6 +58,12 @@ var lockdowns: Array = []  # crystal lockdown shards (Ship::lockdowns, LockdownR
 var env: ShipEnvironment  # oxygen, doors, fire spread
 var graph: ShipGraph  # slots and door pathfinding (rules/crew.md)
 var hostile := true  # crew fight only aboard a hostile ship (ShipManager hostile flag)
+## Autobattle demo (scripts/autobattle/): a player-side ship (is_player) built from an enemy blueprint keeps the enemy
+## art and enemy-only blueprint traits (hull from ships_glow, stretched enemy bubble, consoles, automated crewless
+## ships). False everywhere in the game itself.
+var enemy_art := false
+## Autobattle demo: a player-side ship driven by its own ShipAI (it may use its mind control like an enemy's).
+var ai_driven := false
 var rng := RandomNumberGenerator.new()  # crew combat rolls (target pick, hit damage, timers)
 
 const HUMAN_HP := 100.0
@@ -769,9 +775,15 @@ func set_shield_layers_max(n: int) -> void:
 	shield_up_t = SHIELD_UP_TIME  # InstantCharge: full size at once, no sound
 
 
+## Drawn with the player-ship art (own `_base` / `_floor` / `_shields1` images, interiors): the player side, except
+## an autobattle ship built from an enemy blueprint (`enemy_art`).
+func player_art() -> bool:
+	return is_player and not enemy_art
+
+
 ## ShipManager::bAutomated: a crewless enemy (blueprint crewCount amount 0, or the flagship after its crew died).
 func is_automated() -> bool:
-	return not is_player and blueprint.get("crew", []).is_empty()
+	return (not is_player or enemy_art) and blueprint.get("crew", []).is_empty()
 
 
 ## Manning bonus level of a system (0 = none, 1..3 = skill level of the crew actively manning it).
@@ -809,7 +821,7 @@ func is_boostable(id: String) -> bool:
 		var e := sys("engines")
 		return e != null and e.effective_power() > 0  # follows "engines functioning"
 	if id == "artillery":
-		return not is_player  # bBoostable = (iShipId != 0)
+		return not player_art()  # bBoostable = (iShipId != 0) (autobattle: an enemy-art ship keeps it)
 	return BOOSTABLE.has(id)
 
 

@@ -68,6 +68,8 @@ var _smokes: Array = []  # [{room, tile, t, phase}]: one-shot fire_smoke after a
 var _sparks := {}  # room -> {start, cycle, rot, mirror, mask}: stun_spark_big random orientation per cycle
 var _thruster_phase := 0.0
 var _blk := {}  # rooms blacked out this frame (ShipState.blacked_out_rooms)
+## Autobattle demo: no room is ever blacked out (both interiors fully visible). False in the game.
+static var reveal_all := false
 var jump_time := -1.0  # s into ShipManager::jumpAnimation (2.0 s, started by JumpLeave), −1 = not jumping
 var jump_driven := false  # player jump: jump_time is set by main.gd (set_jump_frame), not advanced here
 var _smoke_emitters := {}  # CrewMember -> {parts: [{p, v, life}], counter, running}: firefight_cloud particles
@@ -109,7 +111,7 @@ func _facing(c: CrewMember) -> String:
 func setup(state: ShipState) -> void:
 	ship = state
 	var img: String = ship.blueprint.img
-	if ship.is_player:
+	if ship.player_art():
 		hull_tex = FtlData.texture("img/ship/" + img + "_base.png")
 		floor_tex = FtlData.texture("img/ship/" + String(ship.blueprint.get("floor_img", img)) + "_floor.png")
 		# Shields::Shields 0x0060b230: player = "ship/<shieldFile>_shields1.png" (<shieldImage>, default img).
@@ -581,7 +583,7 @@ func _draw_jump() -> void:
 		if glare and float(g[2]) > 0.0:
 			draw_texture_rect(glare, Rect2(hull_pos + Vector2(g[0], g[1]), Vector2(g[2], g[2])), false)
 	# Player ship (bShowEngines): the thrusters at alpha 1 − min(progress / 0.75, 1), after the glare.
-	if ship.is_player:
+	if ship.player_art():
 		_draw_thrusters(1.0 - minf(p / 0.75, 1.0), true)
 
 
@@ -991,7 +993,7 @@ func _draw_ship() -> void:
 		_blk = {}
 		return
 	drew_interior = true
-	_blk = {} if ship.is_destroyed() else ship.blacked_out_rooms()
+	_blk = {} if ship.is_destroyed() or reveal_all else ship.blacked_out_rooms()
 
 	# Room floor (Room::OnRenderFloor): flat colour that shifts toward salmon as oxygen drops, then the low-O2
 	# stripes at ≤ 5 % (Room::OnRenderO2Low); both skipped in blacked-out rooms. Then the grid (all rooms).
@@ -1103,7 +1105,7 @@ func _draw_explosion() -> void:
 ## Ship::OnInit for kestral* / fed_cruiser*), while the engines give evasion; `always` (Ship::OnRenderJump: jump
 ## away, hangar HIDE ROOMS) skips the evasion check.
 func _draw_thrusters(alpha := 1.0, always := false) -> void:
-	if not ship.is_player or ship.is_destroyed() or (ship.dodge_factor() == 0 and not always):
+	if not ship.player_art() or ship.is_destroyed() or (ship.dodge_factor() == 0 and not always):
 		return
 	var img: String = ship.blueprint.img
 	for key in THRUSTERS:
@@ -1164,9 +1166,9 @@ func _draw_interiors() -> void:
 			"clonebay":
 				_draw_clonebay(s)
 			_:
-				if ship.is_player:
+				if ship.player_art():
 					_draw_player_interior(s, b, rect)
-		if not ship.is_player:
+		if not ship.player_art():
 			_draw_enemy_console(s, b)
 		if int(ship.room_hack.get(s.room, 0)) > 0:
 			_draw_hacked_console(s, b)
@@ -1215,7 +1217,7 @@ func console_art(s: SystemState) -> Dictionary:
 	var slot := ship.graph.console_slot(s.room)
 	if slot < 0 or _computer_level(s) < 0:
 		return {"kind": "", "slot": -1, "dir": ""}
-	if not ship.is_player:
+	if not ship.player_art():
 		return {"kind": "computer", "slot": slot, "dir": ship.graph.console_dir(s.room)}
 	var img := interior_image(s.id, ship.system_by_id(s.id))
 	var lay := FtlData.room_layout(img) if img != "" else {}
@@ -1549,7 +1551,7 @@ func _draw_shield_bubble() -> void:
 
 ## OnRenderBaseShield, player ship only: the layer-pop ghost or the super-shield wave (mask_layer).
 func _draw_shield_mask() -> void:
-	if shield_tex == null or ship == null or ship.is_destroyed() or not ship.is_player:
+	if shield_tex == null or ship == null or ship.is_destroyed() or not ship.player_art():
 		return
 	var mat := mask_layer.material as ShaderMaterial
 	if ship.super_up_t >= 0.0:
@@ -1592,7 +1594,7 @@ void fragment() {
 ## (Shields::RenderBase 0x0060c100, centre = Ship::GetBaseEllipse 0x00480be0): player (iShipId 0) = the image at its
 ## own pixel size about the ellipse centre; enemy = the image scaled to 2a × 2b about the centre.
 static func bubble_rect(s: ShipState, tex_size: Vector2) -> Rect2:
-	if s.is_player:
+	if s.player_art():
 		return Rect2(s.shield_center - (tex_size / 2).floor(), tex_size)
 	return Rect2(s.shield_center - s.shield_axes, s.shield_axes * 2)
 
@@ -1606,7 +1608,7 @@ func _render_base(ci: CanvasItem, layers: int, max_layers: int, super_n: int, al
 	var rect := bubble_rect(ship, shield_tex.get_size())
 	var a := 0.0
 	if layers > 0 and max_layers > 0:
-		a = float(layers) / (3.5 if ship.is_player else 4.0) * 0.6 + 0.4
+		a = float(layers) / (3.5 if ship.player_art() else 4.0) * 0.6 + 0.4
 	if ci == bubble_layer:
 		a = maxf(a, shield_flash)
 	if a > 0.0:
@@ -1627,7 +1629,7 @@ func _scaled_bubble(rect: Rect2, s: float) -> Rect2:
 	if s >= 1.0:
 		return rect
 	var pivot := rect.get_center()
-	if not ship.is_player:
+	if not ship.player_art():
 		pivot = rect.position + Vector2(rect.size.x * rect.size.x / 2.0 / shield_tex.get_width(),
 			rect.size.y * rect.size.y / 2.0 / shield_tex.get_height())
 	return Rect2(pivot + (rect.position - pivot) * s, rect.size * s)

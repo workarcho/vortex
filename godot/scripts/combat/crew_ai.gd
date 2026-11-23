@@ -48,6 +48,9 @@ const MAN_PRIORITY_HARD := {"shields": 67, "engines": 65}
 
 var ship: ShipState
 var ai_on := false  # bAIon = not the player ship
+## Autobattle demo (scripts/autobattle/): no crew is player-controllable — the player side's own crew (with `ai_on`)
+## and player-owned boarders are AI-driven too. False in the game.
+var all_ai := false
 var hostile := true  # runs only while hostile (ShipAI.hostile for enemies)
 var calm := true  # bCalmShip
 var hurt_crew := false  # bHurtCrew
@@ -121,7 +124,7 @@ func tick() -> void:
 
 ## Player-controllable crew (the player's crew, also when boarding; never while mind controlled).
 func controllable(c: CrewMember) -> bool:
-	return c.player_owned and not c.is_drone() and not c.mind_controlled
+	return not all_ai and c.player_owned and not c.is_drone() and not c.mind_controlled
 
 
 func is_intruder(c: CrewMember) -> bool:

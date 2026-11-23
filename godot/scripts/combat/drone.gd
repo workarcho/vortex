@@ -309,7 +309,7 @@ func on_deploy() -> void:
 			land_time = -1.0
 			var hs := HackingRule.system(owner)
 			pos = owner.room_rect(hs.room).get_center() if hs and hs.room >= 0 else owner.shield_center
-			if owner.is_player:
+			if owner.player_art():  # (autobattle: an enemy-art ship on the player side launches upward like an enemy)
 				destination = Vector2(owner.shield_center.x + HACK_EXIT_DIST, pos.y)
 			else:
 				destination = Vector2(pos.x, owner.shield_center.y - HACK_EXIT_DIST)
