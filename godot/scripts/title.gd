@@ -75,7 +75,9 @@ func _ready() -> void:
 		_setup_forced = true
 		FrameHost.change_scene(get_tree(), DATA_SETUP_SCENE)
 		return
-	if args.has("--autobattle"):
+	# --autobattle, or the project setting ftl/autobattle/start (an override.cfg next to the exported exe: the
+	# wallpaper build, which cannot pass command-line arguments everywhere).
+	if args.has("--autobattle") or bool(ProjectSettings.get_setting("ftl/autobattle/start", false)):
 		FrameHost.change_scene(get_tree(), AUTOBATTLE_SCENE)
 		return
 	if skips_menu(args):

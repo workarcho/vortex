@@ -71,6 +71,8 @@ var _saved_aspect := Window.CONTENT_SCALE_ASPECT_EXPAND
 func _ready() -> void:
 	stats = {"rounds_started": 0, "rounds_ended": 0, "reasons": [], "fired": {true: 0, false: 0},
 		"powered": {true: false, false: false}, "damaged": {true: false, false: false}, "matchups": []}
+	if bool(ProjectSettings.get_setting("ftl/autobattle/mute", false)):  # wallpaper build (override.cfg)
+		FtlData.muted = true
 	for a in OS.get_cmdline_user_args():
 		if a == "--mute":
 			FtlData.muted = true
