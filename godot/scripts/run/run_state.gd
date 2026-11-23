@@ -43,7 +43,7 @@ var selected_sector := -1
 var phase := Phase.IDLE
 var dialog := {}  # LocationEvent on screen
 var dialog_choices: Array = []  # [{index (in dialog.choices), text, enabled, blue, preview, event}]
-var dialog_rewards: Array = []  # [[kind, amount or name]] applied when this event opened
+var dialog_rewards: Array = []  # reward box of the open event [[kind, amount or name]] (applied on the choice)
 var highlighted := -1  # touch: first tap on a choice
 var messages: Array = []  # message boxes (quests, last stand placeholder, ...)
 var enemy := {}  # event ship: {ship_ev, blueprint, plan, hostile, surrendered, escaping, escape_timer, done, ...}
@@ -813,8 +813,12 @@ func end_run(kind: String, text := "") -> void:
 
 # ------------------------------------------------------------------ events
 
-## WorldManager::UpdateLocation: apply the event's effects, spawn / update its ship, open the choice box (or
-## close it when the event is empty).
+## WorldManager::UpdateLocation (005f57d0) + CreateChoiceBox: the effects applied when the event is shown (ship /
+## hostile flip, status effects, store, hull damage / repair, map reveal, pursuit, environment, boarders, quest,
+## ship unlock, secret sector), then the choice box. The event's ModifyResources part (resources, items, crew,
+## upgrade, system: `apply_effects`) waits for the choice (`choose`, WorldManager::PauseLoop 005f6268) — except for
+## an event without text (no box), which CreateChoiceBox applies at once (005f0fd5). The reward box lists the event
+## as resolved, before it is applied (`event_rewards`; rules/events.md §3.4).
 func show_event(ev: Dictionary) -> void:
 	highlighted = -1
 	if not ev.is_empty():
@@ -851,13 +855,27 @@ func show_event(ev: Dictionary) -> void:
 			hazard.apply_status(ship)
 		if ev_env == HazardRule.Env.PDS:
 			hazard.pds_origin = HazardRule.pds_origin_for(space)
-	dialog_rewards = apply_effects(ev)
+	# UpdateLocation order: ship / hostile, CheckStatusEffects, CreateStore, PossibleDamage, reveal, pursuit,
+	# environment (above: the hazard must exist before the ship is built), AddBoarders, quest, unlock, secret sector.
 	if not ev.ship.is_empty():
 		if ev.ship.get("hostile_only", false):
 			if not enemy.is_empty():
 				enemy.hostile = bool(ev.ship.hostile)
 		else:
 			_spawn_enemy(ev.ship)
+	for st in ev.status:
+		_status(st)
+	var located := []  # reward-box entries of these effects (hull, intruders)
+	for d in ev.damage:
+		_damage(d)
+		if int(d.amount) != 0:
+			located.append(["hull", -int(d.amount)])  # stuff.hullDamage = the sum of the damage amounts
+	if not ev.boarders.is_empty() and int(ev.boarders.get("amount", 0)) > 0:
+		located.append(["boarders", int(ev.boarders.amount)])  # stuff.intruders: boarders.amount > 0
+		# UpdateLocation / CreateLocation: boarders added while the player has a Zoltan super shield -> the event
+		# text gets " \n\n" + intruder_energy ("they must have a super shield bypass").
+		if add_boarders(ev.boarders) > 0 and ship.super_shield > 0:
+			ev.text = String(ev.text) + " \n\n" + engine.tr_text("intruder_energy")
 	if int(ev.get("modify_pursuit", 0)) != 0 and fleet != null:
 		fleet.pursuit_delay += int(ev.modify_pursuit)
 	if ev.get("reveal_map", false) and map != null:
@@ -870,21 +888,22 @@ func show_event(ev: Dictionary) -> void:
 	_unlock_ship(ev)
 	if ev.store and map != null and beacon().shop == null:
 		_open_store_later()
+	if String(ev.get("text", "")) == "":
+		# CreateChoiceBox (005f0fd5): main text "" (and not loading a game) -> ModifyResources at once; a returned
+		# DUMMY clone event (crew loss with a clonebay and a clone text) replaces the event: its box is shown.
+		apply_effects(ev)
+		if clone_text != "":
+			_show_clone_box({})
+			return
+	else:
+		_prepare_crew(ev)
+		dialog_rewards = event_rewards(ev) + located
 	dialog_choices = choice_views(ev)
-	if clone_text != "":
-		# The clonebay text (DUMMY event, EVENT_CLONED) replaces the dialog: its text, one continue, no box.
-		dialog = engine.new_event("DUMMY")
-		dialog.text = clone_text
-		dialog.content = true
-		dialog.choices = [{"text": engine.tr_text("continue"), "req": "", "lvl": 1, "max_lvl": 1 << 30,
-			"max_group": -1, "blue": false, "hidden": true, "event": {}}]
-		dialog_choices = choice_views(dialog)
-		dialog_rewards = []
 	if String(dialog.get("text", "")) == "":
 		# ChoiceBox::SetChoices (004edfb0, via CreateChoiceBox -> CommandGui::NewLocation): bOpen = true, then
 		# bOpen = false when the main text (after the quest / unlock / intruder appends) is "": an outcome without
 		# text (e.g. `<event><ship hostile="true"/></event>`, the attack / refuse choices) opens no box; its
-		# effects are applied all the same (CreateChoiceBox calls ModifyResources at once for an empty text).
+		# effects are applied all the same (above).
 		_log("event %s (no text: no box)" % ev.name)
 		var secret: bool = ev.get("secret_sector", false)
 		_close_dialog()
@@ -905,8 +924,32 @@ func choose(i: int) -> bool:
 		return false
 	_log("choice %d: %s" % [i + 1, v.text])
 	Hooks.emit(&"choice_chosen", self, i, v)
+	# WorldManager::PauseLoop (005f6268): a choice picked -> ModifyResources(lastLocationEvent): the open event's
+	# resources, items, crew, upgrade and system are applied now (the HUD counters change here), then
+	# UpdateLocation(chosen event). A crew loss with a clonebay and a clone text returns the DUMMY clone event: it
+	# is shown first, its single (hidden-reward) choice leading to the chosen event (bExtraChoice).
+	clone_text = ""
+	apply_effects(dialog)
+	if clone_text != "":
+		_show_clone_box(v.event)
+		return true
 	show_event(v.event)
 	return true
+
+
+## The DUMMY event of a crew loss with a clonebay (ModifyResources, EVENT_CLONED): the clone text, one hidden
+## `continue` choice leading to `next` (the chosen event; {} = closes), no rewards of its own.
+func _show_clone_box(next: Dictionary) -> void:
+	dialog = engine.new_event("DUMMY")
+	dialog.text = clone_text
+	dialog.content = true
+	dialog.choices = [{"text": engine.tr_text("continue"), "req": "", "lvl": 1, "max_lvl": 1 << 30,
+		"max_group": -1, "blue": false, "hidden": true, "event": next}]
+	clone_text = ""
+	dialog_choices = choice_views(dialog)
+	dialog_rewards = []
+	phase = Phase.DIALOG
+	_log("event DUMMY (clone text)")
 
 
 func _close_dialog() -> void:
@@ -1062,9 +1105,14 @@ func equipment_level(req: String) -> int:
 	return n
 
 
-## WorldManager::ModifyResources + the event's items, crew, damage, status. Returns what changed for the box.
+## WorldManager::ModifyResources (005f0290): fuel / missiles / drone parts / scrap, weapon / augment / drone, item
+## removed, upgrade, system, crew gained / lost (clone text). Called when a choice of the event's box is picked
+## (`choose`), or at once for an event without text (`show_event`). Returns what actually changed (log / tests; the
+## box shows `event_rewards`).
 func apply_effects(ev: Dictionary) -> Array:
 	var out := []
+	if ev.is_empty() or not ev.has("res"):
+		return out
 	for k in EventEngine.RES_KEYS:
 		var v := int(ev.res[k])
 		if v == 0:
@@ -1103,20 +1151,18 @@ func apply_effects(ev: Dictionary) -> Array:
 		# CreateEvent: the event's skill levels ((max / 2) * level), or RandomSkills(worldLevel) when it names none;
 		# rolled once for the blueprint (every copy gets them). Drawn from CrewIdentity.rng at application so the
 		# event streams of a seed are unchanged (the exe draws from the global RNG at creation).
-		var skills: Dictionary = ev.crew.get("skills", {})
-		if skills.is_empty() and int(ev.crew.amount) > 0:
+		# A box shown first rolled the blueprint (skills + first identity) for its reward list (`_prepare_crew`).
+		var pend: Dictionary = ev.get("crew_pending", {})
+		var skills: Dictionary = pend.get("skills", ev.crew.get("skills", {}))
+		if skills.is_empty() and int(ev.crew.amount) > 0 and not pend.has("skills"):
 			skills = RunStore.random_skills(engine.level if engine != null else 0, CrewIdentity.rng)
 		for i in maxi(int(ev.crew.amount), 0):
 			if int(ev.crew.amount) > 0:
 				# AddCrewMember with the event's blueprint: a fixed name when the tag has `id` (e.g. name_Charlie),
 				# else a random unused name, gender and colours (CrewIdentity); placed via the pilot room.
-				var ident := {}
-				if String(ev.crew.get("name", "")) != "":
-					ident = CrewIdentity.roll(ev.crew.race, CrewIdentity.rng, CrewIdentity.used_names(ship))
-					ident.name = String(ev.crew.name)
-					var pool: Dictionary = FtlData.crew_names().names
-					if pool.has(ident.name):
-						ident.male = bool(pool[ident.name])
+				var ident: Dictionary = pend.get("ident", {}) if i == 0 else {}
+				if ident.is_empty():
+					ident = _crew_ident(ev.crew)
 				score.add_crew()  # ModifyResources: once per iteration
 				var c := ship.add_crew(ev.crew.race, true, -1, ident)
 				if c:
@@ -1124,6 +1170,7 @@ func apply_effects(ev: Dictionary) -> Array:
 					var rw := crew_reward(c, false)
 					rw["skills"] = skills.duplicate()  # ChoiceBox crew item: skill icons of the blueprint
 					out.append(["crew", ev.crew.race, rw])
+		_note_crew_names()  # AddCrewMember sets the "ruwen" flag (the crew joins on the choice)
 	if not ev.remove_crew.is_empty():
 		out.append_array(_lose_crew(ev.remove_crew))
 	if ev.remove != "":
@@ -1131,26 +1178,80 @@ func apply_effects(ev: Dictionary) -> Array:
 		out.append(["removed", ev.remove])
 	if not ev.upgrade.is_empty():
 		_upgrade(ev.upgrade.system, int(ev.upgrade.amount))
-		var up := upgrade_result(ev.upgrade.system, int(ev.upgrade.amount))
-		if not up.is_empty():
-			out.append(["upgrade", ev.upgrade.system, up.flag, up.amount])
+		out.append(["upgrade", ev.upgrade.system])
 	if String(ev.get("system", "")) != "":
 		# ModifyResources: AddSystem(systemId) whenever the event has one (no fit check here: the choice was
 		# greyed); the reward box shows `<system>_installed` whatever AddSystem did.
 		install_system(String(ev.system))
 		out.append(["system", String(ev.system)])
-	for d in ev.damage:
-		_damage(d)
-		if int(d.amount) != 0:
-			out.append(["hull", -int(d.amount)])
-	for st in ev.status:
-		_status(st)
-	if not ev.boarders.is_empty() and add_boarders(ev.boarders) > 0:
-		out.append(["boarders", int(ev.boarders.amount)])
-		# UpdateLocation / CreateLocation: boarders added while the player has a Zoltan super shield -> the event
-		# text gets " \n\n" + intruder_energy ("they must have a super shield bypass").
-		if ship.super_shield > 0:
-			ev.text = String(ev.text) + " \n\n" + engine.tr_text("intruder_energy")
+	return out
+
+
+## The identity of an event crew member: a fixed name when the tag has `id` (gender from the name list), else {}
+## (AddCrewMember rolls a random unused name, gender and colours).
+func _crew_ident(spec: Dictionary) -> Dictionary:
+	if String(spec.get("name", "")) == "":
+		return {}
+	var ident := CrewIdentity.roll(spec.race, CrewIdentity.rng, CrewIdentity.used_names(ship))
+	ident.name = String(spec.name)
+	var pool: Dictionary = FtlData.crew_names().names
+	if pool.has(ident.name):
+		ident.male = bool(pool[ident.name])
+	return ident
+
+
+## A box about to show a crew gain: the event's CrewBlueprint (CreateEvent: name, gender, colours, skills) exists
+## before the choice, so the reward box can show it; rolled here (CrewIdentity stream, same draws as at application)
+## and kept in `ev.crew_pending` for `apply_effects` (the first copy).
+func _prepare_crew(ev: Dictionary) -> void:
+	if ev.crew.is_empty() or int(ev.crew.amount) <= 0 or ev.has("crew_pending"):
+		return
+	var skills: Dictionary = ev.crew.get("skills", {})
+	if skills.is_empty():
+		skills = RunStore.random_skills(engine.level if engine != null else 0, CrewIdentity.rng)
+	var ident := _crew_ident(ev.crew)
+	if ident.is_empty():
+		ident = CrewIdentity.roll(ev.crew.race, CrewIdentity.rng, CrewIdentity.used_names(ship))
+	ev["crew_pending"] = {"ident": ident, "skills": skills}
+
+
+## The reward box of a shown event (CreateChoiceBox -> CommandGui::NewLocation(…, event->stuff)): the event's
+## ResourceEvent as resolved, BEFORE ModifyResources applies it on the choice [exe]: the raw fuel / missiles / drone
+## parts / scrap amounts (no augment bonus, no clamping), the weapon / drone / augment named by the event, the crew
+## blueprint gained, the crew member that will be lost (SelectRandomCrew with lastSelectedCrewSeed, the same pick
+## ModifyResources makes), the item removed, the upgrade alert (computed now, on the ship before the upgrade) and the
+## system. Hull and intruder entries come from `show_event` (UpdateLocation applied them already).
+func event_rewards(ev: Dictionary) -> Array:
+	var out := []
+	for k in EventEngine.RES_KEYS:
+		if int(ev.res[k]) != 0:
+			out.append([k, int(ev.res[k])])
+	for kind in ["weapon", "drone", "augment"]:
+		if ev[kind] != "":
+			out.append([kind, ev[kind]])
+	var lose: Dictionary = ev.remove_crew if not ev.remove_crew.is_empty() else (
+		ev.crew if not ev.crew.is_empty() and int(ev.crew.amount) < 0 else {})
+	if not lose.is_empty():
+		var c := select_random_crew(String(lose.get("race", "")))
+		if c != null:
+			var rw := crew_reward(c, true)
+			if bool(lose.get("traitor", false)):
+				rw.traitor = true
+			out.append(["crew_lost", c.race, rw])
+	var pend: Dictionary = ev.get("crew_pending", {})
+	if not pend.is_empty():
+		var ident: Dictionary = pend.ident
+		out.append(["crew", ev.crew.race, {"name": String(ident.get("name", "")), "lost": false,
+			"race": String(ev.crew.race), "male": bool(ident.get("male", true)),
+			"colors": (ident.get("colors", []) as Array).duplicate(), "skills": (pend.skills as Dictionary).duplicate()}])
+	if ev.remove != "":
+		out.append(["removed", ev.remove])
+	if not ev.upgrade.is_empty():
+		var up := upgrade_result(ev.upgrade.system, int(ev.upgrade.amount))
+		if not up.is_empty():
+			out.append(["upgrade", ev.upgrade.system, up.flag, up.amount])
+	if String(ev.get("system", "")) != "":
+		out.append(["system", String(ev.system)])
 	return out
 
 
@@ -1329,11 +1430,11 @@ func can_upgrade(sys_id: String, amount: int) -> int:
 	return mini(amount, UpgradeSession.max_level(ship, sys_id) - s.level)
 
 
-## The reward box's upgrade alert (WorldManager::CreateChoiceBox, computed AFTER ModifyResources applied the
-## upgrade) [exe]: amount > 0 only; HasSystem(id) or reactor -> n = CanUpgrade(id, amount) on the upgraded ship:
-## n < 1 -> flag 2 (`upgrade_fail_max`), else flag 1 (`upgrade_success`, \2 = n); missing -> flag 3
-## (`upgrade_fail_missing`). So a system brought to its maximum by this very upgrade reports "maxed".
-## Returns {flag, amount} or {} (amount <= 0).
+## The reward box's upgrade alert (WorldManager::CreateChoiceBox, upgradeSuccessFlag) [exe]: amount > 0 only;
+## HasSystem(id) or reactor -> n = CanUpgrade(id, amount) on the ship as it is when the box opens: n < 1 -> flag 2
+## (`upgrade_fail_max`), else flag 1 (`upgrade_success`, \2 = n); missing -> flag 3 (`upgrade_fail_missing`).
+## A box with text is built before ModifyResources (applied on the choice), so the alert describes the upgrade
+## about to happen (`event_rewards`). Returns {flag, amount} or {} (amount <= 0).
 func upgrade_result(sys_id: String, amount: int) -> Dictionary:
 	if amount <= 0:
 		return {}

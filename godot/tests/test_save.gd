@@ -259,6 +259,30 @@ func _round_trip() -> void:
 	check("dialog restored", [r4.phase, String(r4.dialog.get("name", "")), r4.dialog_choices.size()],
 		[r3.phase, String(r3.dialog.get("name", "")), r3.dialog_choices.size()])
 	check("dialog choice works after load", r4.choose(0), true)
+	# Saved while a box with pending resources is open (rules/events.md §3.4): vanilla's ship was exported before
+	# ModifyResources and LoadGame rebuilds the box (bLoadingGame: nothing re-applied); the resources are applied
+	# once, when the loaded box's choice is picked.
+	var rp := RunState.new_run(99, "PLAYER_SHIP_HARD")
+	close_dialogs(rp)
+	var pev := rp.engine.new_event("SAVE_PENDING")
+	pev.text = "found"
+	pev.content = true
+	pev.res.scrap = 9
+	pev.crew = {"amount": 1, "race": "engi"}
+	pev.choices = [{"text": "continue", "req": "", "lvl": 1, "max_lvl": 1 << 30, "max_group": -1, "blue": false,
+		"hidden": true, "event": {}}]
+	rp.show_event(pev)
+	var scrap_p := rp.ship.scrap
+	var crew_p := rp.ship.crew.size()
+	SaveGame.save_run(rp)
+	var rl := SaveGame.load_run()
+	check("pending box restored, nothing applied", [rl.phase, rl.ship.scrap, rl.ship.crew.size(),
+		rl.dialog_rewards == rp.dialog_rewards], [RunState.Phase.DIALOG, scrap_p, crew_p, true])
+	rl.choose(0)
+	var newest: CrewMember = rl.ship.crew[rl.ship.crew.size() - 1]
+	check("applied once on the loaded box's choice", [rl.ship.scrap - scrap_p, rl.ship.crew.size() - crew_p], [9, 1])
+	check("the crew member the box showed joins", newest.name_long,
+		String(rp.dialog_rewards.filter(func(x): return x[0] == "crew")[0][2].name))
 	# Pending upgrades in an open upgrade window count (ConfirmUpgrades).
 	var r5 := RunState.new_run(5, "PLAYER_SHIP_HARD")
 	close_dialogs(r5)

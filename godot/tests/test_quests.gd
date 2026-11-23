@@ -213,7 +213,10 @@ func _rock_home_and_secret() -> void:
 	var pod := r.dialog_choices.find_custom(func(v): return v.enabled and v.event.get("remove", "") == "STASIS_POD")
 	check("stasis pod choice offered", pod >= 0, true)
 	r.choose(pod)
-	check("  pod removed", r.equipment_level("STASIS_POD"), 0)
+	check("  pod still carried while the outcome box is open", r.equipment_level("STASIS_POD"), 1)
+	check("  its reward box lists the removal", r.dialog_rewards.has(["removed", "STASIS_POD"]), true)
+	r.choose(0)
+	check("  pod removed on Continue", r.equipment_level("STASIS_POD"), 0)
 	for i in 3:
 		if r.phase == RunState.Phase.DIALOG and not r.ruwen_flag:
 			r.choose(0)
@@ -249,8 +252,8 @@ func _rock_home_and_secret() -> void:
 	var rock_id := r.sector_id
 	r.ship.fuel = 3
 	r.choose(reac)
-	check("  +1 fuel", r.ship.fuel, 4)
-	r.choose(0)  # Continue -> <secretSector/>
+	check("  +1 fuel listed, applied on Continue", [r.dialog_rewards.has(["fuel", 1]), r.ship.fuel], [true, 3])
+	r.choose(0)  # Continue: +1 fuel (ModifyResources) -> <secretSector/>
 	check("secret sector entered", [r.secret_sector, r.sector_desc, r.sector, r.sector_id], [true, "CRYSTAL_HOME", lvl,
 		rock_id])
 	check("  fuel -1 for the jump", r.ship.fuel, 3)
@@ -270,7 +273,10 @@ func _rock_home_and_secret() -> void:
 	if qs.size() == 1:
 		close_dialogs(r)
 		r.jump_to(qs[0])
-		check("  CRYSTAL_UNLOCK: unlock ship 8 recorded", r.unlocked_ships.has(8), true)
+		check("  CRYSTAL_UNLOCK: unlock ship 8 recorded when the box opens", r.unlocked_ships.has(8), true)
+		check("  CRYSTAL_SHARDS augment pending in the box", [r.ship.has_augment("CRYSTAL_SHARDS"),
+			r.dialog_rewards.has(["augment", "CRYSTAL_SHARDS"])], [false, true])
+		r.choose(0)
 		check("  CRYSTAL_SHARDS augment", r.ship.has_augment("CRYSTAL_SHARDS"), true)
 	# leave: NEXT SECTOR at the exit -> random sector of level + 1, no sector choice
 	close_dialogs(r)

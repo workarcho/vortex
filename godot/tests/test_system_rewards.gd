@@ -3,7 +3,7 @@ extends Node
 ## room / starting level / unpowered, medbay <-> clonebay replacement, blueprint without the system), the
 ## CreateChoiceBox warnings (new_system_update / penultimate / last / full / owned / medbay / clonebay, greyed
 ## choices), the `<system>_installed` alert, <upgrade> caps (CanUpgrade, upgrade_fail_max / missing / success,
-## the flag computed after the upgrade, reactor 25), and event crew skills (all_skills / per-skill attributes,
+## the flag computed when the box opens, before the upgrade is applied on the choice, reactor 25), and event crew skills (all_skills / per-skill attributes,
 ## RandomSkills) with their reward-box icons. Small project-made event XML (not FTL text). Run:
 ##   godot --headless --path godot res://tests/test_system_rewards.tscn
 
@@ -62,10 +62,23 @@ func make_run(ship_name := "PLAYER_SHIP_HARD", seed := 3) -> RunState:
 	return r
 
 
+var shown: Array = []  # reward box of the last event shown by `pick`
+var shown_dialog := {}
+
+
+## Shows the event, keeps its reward box (built before ModifyResources) and picks the first choice: the event's
+## resources / system / upgrade / crew are applied then (WorldManager::PauseLoop).
+func pick(r: RunState, name: String) -> void:
+	r.show_event(r.engine.base_event(name))
+	shown = r.dialog_rewards.duplicate(true)
+	shown_dialog = r.dialog
+	r.choose(0)
+
+
 func box(r: RunState) -> Dictionary:
 	var eb := EventBox.new()
 	eb.run = r
-	var res: Dictionary = eb._reward_resources(r.dialog_rewards, r.dialog)
+	var res: Dictionary = eb._reward_resources(shown, shown_dialog)
 	eb.free()
 	return res
 
@@ -109,6 +122,10 @@ func test_install_fits() -> void:
 		if b.id == "cloaking":
 			bp = b
 	r.show_event(r.engine.base_event("GIVE_CLOAK"))
+	check("box open: not installed yet (ModifyResources on the choice)", r.ship.sys("cloaking") == null, true)
+	shown = r.dialog_rewards.duplicate(true)
+	shown_dialog = r.dialog
+	r.choose(0)
 	var s := r.ship.sys("cloaking")
 	check("cloaking installed", s != null, true)
 	if s == null:
@@ -118,7 +135,7 @@ func test_install_fits() -> void:
 		int(UpgradeSession.system_info("cloaking").max)))
 	check("unpowered", s.power, 0)
 	check("listed in system_list", r.ship.system_list().has("cloaking"), true)
-	check("reward entry", r.dialog_rewards.has(["system", "cloaking"]), true)
+	check("reward entry", shown.has(["system", "cloaking"]), true)
 	var res := box(r)
 	check("alert = cloaking_installed", alert_texts(res), [FtlData.tr_id("cloaking_installed")])
 	check("alert helpful (green)", res.alerts[0][1], true)
@@ -142,7 +159,10 @@ func test_choice_warnings() -> void:
 	check("choice enabled", r.dialog_choices[0].enabled, true)
 	check("no system preview in the choice box", ResourceBox.is_empty(r.dialog_choices[0].preview_res), true)
 	r.choose(0)
-	check("choosing installs", r.ship.sys("cloaking") != null, true)
+	check("chosen: the outcome box lists it, not installed yet", [r.dialog_rewards.has(["system", "cloaking"]),
+		r.ship.sys("cloaking") == null], [true, true])
+	r.choose(0)
+	check("its Continue installs", r.ship.sys("cloaking") != null, true)
 	# 6 main systems -> penultimate; 7 -> last.
 	var p := make_run()
 	RunStore.install_system(p.ship, "drones")
@@ -184,7 +204,7 @@ func test_full_and_owned() -> void:
 	check("owned: new_system_owned", o.dialog.system_note, " \n\n" + FtlData.tr_id("new_system_owned"))
 	check("owned: greyed", o.dialog_choices[0].enabled, false)
 	o.ship.sys("cloaking").level = 3
-	o.show_event(o.engine.base_event("GIVE_CLOAK"))  # applied anyway (a top-level event): nothing changes
+	pick(o, "GIVE_CLOAK")  # applied anyway (a top-level event): nothing changes
 	check("owned + applied: level kept", o.ship.sys("cloaking").level, 3)
 	check("owned + applied: installed alert still shown", alert_texts(box(o)), [FtlData.tr_id("cloaking_installed")])
 	check("(start level was)", lvl > 0, true)
@@ -198,7 +218,7 @@ func test_medbay_clonebay() -> void:
 	r.ship.increase_power("medbay")
 	var room := med.room
 	# Put a crew member on the medbay's blocked slot, then install the clonebay in its room.
-	r.show_event(r.engine.base_event("GIVE_CLONE"))
+	pick(r, "GIVE_CLONE")
 	check("medbay gone", r.ship.sys("medbay") == null, true)
 	var cb := r.ship.sys("clonebay")
 	check("clonebay installed", cb != null, true)
@@ -207,9 +227,9 @@ func test_medbay_clonebay() -> void:
 	check("clonebay takes the medbay's level", cb.level, 3)
 	check("clonebay unpowered", cb.power, 0)
 	var g := make_run()
-	g.show_event(g.engine.base_event("GIVE_CLONE"))
+	pick(g, "GIVE_CLONE")
 	check("level stays at least the blueprint power", g.ship.sys("clonebay").level >= 1, true)
-	g.show_event(g.engine.base_event("GIVE_MEDBAY"))
+	pick(g, "GIVE_MEDBAY")
 	check("medbay back, clonebay gone", [g.ship.sys("medbay") != null, g.ship.sys("clonebay") == null], [true, true])
 	# Crew standing in the room move off the blocked slot.
 	var k := make_run()
@@ -234,9 +254,9 @@ func test_upgrade_caps() -> void:
 	var p := r.ship.sys("pilot")
 	var mx := UpgradeSession.max_level(r.ship, "pilot")
 	p.level = mx
-	r.show_event(r.engine.base_event("UP_PILOT"))
+	pick(r, "UP_PILOT")
 	check("at max: level unchanged", p.level, mx)
-	check("reward flag 2 (maxed)", r.dialog_rewards.has(["upgrade", "pilot", 2, 1]), true)
+	check("reward flag 2 (maxed)", shown.has(["upgrade", "pilot", 2, 1]), true)
 	var res := box(r)
 	check("upgrade_fail_max text", alert_texts(res),
 		[FtlData.tr_id("upgrade_fail_max").replace("\\1", FtlData.tr_id("pilot"))])
@@ -245,50 +265,61 @@ func test_upgrade_caps() -> void:
 	check("alert kind white", lay.ops.filter(func(o): return o[1] == "text")[0][5], "white")
 	p.level = mx - 2
 	r.show_event(r.engine.base_event("UP_PILOT"))
-	check("two below max: +1", p.level, mx - 1)
-	check("flag 1, amount 1", r.dialog_rewards.has(["upgrade", "pilot", 1, 1]), true)
+	check("box open: not upgraded yet", p.level, mx - 2)
+	shown = r.dialog_rewards.duplicate(true)
+	shown_dialog = r.dialog
+	r.choose(0)
+	check("two below max: +1 on the choice", p.level, mx - 1)
+	check("flag 1, amount 1", shown.has(["upgrade", "pilot", 1, 1]), true)
 	check("upgrade_success text", alert_texts(box(r)),
 		[FtlData.tr_id("upgrade_success").replace("\\1", FtlData.tr_id("pilot")).replace("\\2", "1")])
-	# One below max: upgraded to the max, then CanUpgrade on the upgraded ship is 0 -> "maxed" (exe order).
-	r.show_event(r.engine.base_event("UP_PILOT"))
+	# One below max: the box (built before the upgrade) says success, then the choice brings it to the max.
+	pick(r, "UP_PILOT")
 	check("one below max: reaches max", p.level, mx)
-	check("one below max: flag 2 although upgraded", r.dialog_rewards.has(["upgrade", "pilot", 2, 1]), true)
-	# amount 2 from max - 3: +2, then CanUpgrade(2) = 1 -> success with \2 = 1.
+	check("one below max: flag 1 (computed before the upgrade)", shown.has(["upgrade", "pilot", 1, 1]), true)
+	# amount 2 from max - 3: CanUpgrade(2) = 2 on the box -> success with \2 = 2, then +2.
 	p.level = mx - 3
-	r.show_event(r.engine.base_event("UP_PILOT2"))
-	check("amount 2 capped: +2", p.level, mx - 1)
-	check("flag 1, amount re-capped to 1", r.dialog_rewards.has(["upgrade", "pilot", 1, 1]), true)
+	pick(r, "UP_PILOT2")
+	check("amount 2: +2", p.level, mx - 1)
+	check("flag 1, amount 2", shown.has(["upgrade", "pilot", 1, 2]), true)
 	p.level = mx - 1
-	r.show_event(r.engine.base_event("UP_PILOT2"))
+	pick(r, "UP_PILOT2")
 	check("amount 2 one below max: capped at max", p.level, mx)
+	check("amount 2 one below max: flag 1, amount capped to 1", shown.has(["upgrade", "pilot", 1, 1]), true)
 	# Missing system.
-	r.show_event(r.engine.base_event("UP_CLOAK"))
-	check("missing: flag 3", r.dialog_rewards.has(["upgrade", "cloaking", 3, 1]), true)
+	pick(r, "UP_CLOAK")
+	check("missing: flag 3", shown.has(["upgrade", "cloaking", 3, 1]), true)
 	check("upgrade_fail_missing text", alert_texts(box(r)),
 		[FtlData.tr_id("upgrade_fail_missing").replace("\\1", FtlData.tr_id("cloaking"))])
 	# Reactor: 25 cap.
 	r.ship.reactor_max = 24
-	r.show_event(r.engine.base_event("UP_REACTOR"))
+	pick(r, "UP_REACTOR")
 	check("reactor 24 -> 25", r.ship.reactor_max, 25)
-	check("reactor reaching 25: flag 2", r.dialog_rewards.has(["upgrade", "reactor", 2, 1]), true)
-	r.show_event(r.engine.base_event("UP_REACTOR"))
+	check("reactor reaching 25: flag 1", shown.has(["upgrade", "reactor", 1, 1]), true)
+	pick(r, "UP_REACTOR")
 	check("reactor capped at 25", r.ship.reactor_max, 25)
+	check("reactor at 25: flag 2", shown.has(["upgrade", "reactor", 2, 1]), true)
 	r.ship.reactor_max = 8
-	r.show_event(r.engine.base_event("UP_REACTOR"))
-	check("reactor 8 -> 9, success", [r.ship.reactor_max, r.dialog_rewards.has(["upgrade", "reactor", 1, 1])],
+	pick(r, "UP_REACTOR")
+	check("reactor 8 -> 9, success", [r.ship.reactor_max, shown.has(["upgrade", "reactor", 1, 1])],
 		[9, true])
 	# all = id 16: nothing upgraded, reported missing.
 	var before := r.ship.systems.values().map(func(s): return s.level)
-	r.show_event(r.engine.base_event("UP_ALL"))
+	pick(r, "UP_ALL")
 	check("all: nothing upgraded", r.ship.systems.values().map(func(s): return s.level), before)
-	check("all: flag 3", r.dialog_rewards.has(["upgrade", "all", 3, 1]), true)
+	check("all: flag 3", shown.has(["upgrade", "all", 3, 1]), true)
 
 
 func test_crew_skills() -> void:
 	print("Event crew skills")
 	var r := make_run()
+	var n0 := r.ship.crew.size()
 	r.show_event(r.engine.base_event("CREW_SKILLS"))
-	var rw: Array = r.dialog_rewards.filter(func(x): return x[0] == "crew")
+	check("box open: crew not added yet", r.ship.crew.size(), n0)
+	shown = r.dialog_rewards.duplicate(true)
+	r.choose(0)
+	check("crew joins on the choice", r.ship.crew.size(), n0 + 1)
+	var rw: Array = shown.filter(func(x): return x[0] == "crew")
 	check("one crew reward", rw.size(), 1)
 	var c: CrewMember = r.ship.crew[r.ship.crew.size() - 1]
 	check("pilot at max", c.skills.get("pilot", 0.0), float(c.skill_cap("pilot")))

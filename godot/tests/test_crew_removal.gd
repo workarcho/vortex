@@ -107,6 +107,7 @@ func test_preference() -> void:
 	check("no mantis: everyone possible", seen.size(), 4)
 	var t := make_run()
 	t.show_event(t.engine.base_event("RC_ENGI"))
+	t.choose(0)
 	check("no engi aboard: someone still lost", own_names(t.ship).size(), 2)
 
 
@@ -115,20 +116,28 @@ func test_gone() -> void:
 	var r := make_run()
 	var before := own_names(r.ship)
 	r.show_event(r.engine.base_event("RC_GONE"))
-	var after := own_names(r.ship)
-	check("one crew gone from the ship at once", after.size(), before.size() - 1)
-	var lost := before.filter(func(n): return not after.has(n))
-	check("reward names the victim", r.dialog_rewards.size() == 1 and r.dialog_rewards[0][0] == "crew_lost"
-		and r.dialog_rewards[0][2].name == lost[0], true)
-	check("ResourceBox text", ResourceBox.crew_text(r.dialog_rewards[0][2]), "%s is gone" % lost[0])
-	check("not in the clone queue", r.ship.clone_queue.size(), 0)
+	# The box opens with the victim previewed (CreateChoiceBox: SelectRandomCrew with lastSelectedCrewSeed); the
+	# crew member is removed by ModifyResources when the choice is picked (PauseLoop).
+	check("box open: nobody removed yet", own_names(r.ship), before)
+	var shown: Array = r.dialog_rewards.duplicate(true)
 	check("event text kept (no clonebay)", r.dialog.text, "lost")
+	r.choose(0)
+	var after := own_names(r.ship)
+	check("one crew gone on the choice", after.size(), before.size() - 1)
+	var lost := before.filter(func(n): return not after.has(n))
+	check("reward named the victim before", shown.size() == 1 and shown[0][0] == "crew_lost"
+		and shown[0][2].name == lost[0], true)
+	check("ResourceBox text", ResourceBox.crew_text(shown[0][2]), "%s is gone" % lost[0])
+	check("not in the clone queue", r.ship.clone_queue.size(), 0)
+	check("box closed", r.phase, RunState.Phase.IDLE)
 	check("lost_crew flag", r.lost_crew_flag, true)
 	var p := make_run()
 	p.show_event(p.engine.base_event("TWO"))
+	p.choose(0)
 	check("amount -2: one crew lost", own_names(p.ship).size(), 2)
 	var q := make_run()
 	q.show_event(q.engine.base_event("PLAIN"))
+	q.choose(0)
 	check("plain <crewMember amount=-1>: one lost", own_names(q.ship).size(), 2)
 
 
@@ -145,18 +154,25 @@ func test_clonebay() -> void:
 	r.crew_seed = -1
 	r.crew_seed = 5
 	r.show_event(r.engine.base_event("RC_CLONE"))
+	check("box: event text, victim previewed", [r.dialog.text, r.dialog_rewards.size() == 1
+		and r.dialog_rewards[0][2].name == victim.name_long], ["taken", true])
+	check("box open: not cloned yet", victim.hp, 40.0)
+	r.choose(0)
 	check("nobody lost", own_names(r.ship).size(), n)
 	check("same crew alive", victim.is_alive() and r.ship.crew.has(victim), true)
 	check("full health", victim.hp, victim.max_hp)
 	check("in the clonebay room", victim.room, r.ship.sys("clonebay").room)
 	check("skill loss", victim.skills["pilot"] < 15, true)
 	check("not queued", r.ship.clone_queue.size(), 0)
-	check("dialog = clone text", r.dialog.text, "cloned back")
+	check("dialog = clone text (DUMMY after the choice)", r.dialog.text, "cloned back")
 	check("one continue", r.dialog_choices.size(), 1)
 	check("no crew line", r.dialog_rewards, [])
+	r.choose(0)
+	check("clone box continue -> the chosen (empty) event: closed", r.phase, RunState.Phase.IDLE)
 	var g := make_run("TEST_SHIP_ALL_CLONE")
 	var m := own_names(g.ship).size()
 	g.show_event(g.engine.base_event("RC_GONE"))
+	g.choose(0)
 	check("clone=false: permanently gone", own_names(g.ship).size(), m - 1)
 	check("clone=false: not queued", g.ship.clone_queue.size(), 0)
 	check("clone=false: clone text shown", g.dialog.text, "the clonebay cannot help")
@@ -166,8 +182,10 @@ func test_clonebay() -> void:
 	var k := make_run()
 	var kn := own_names(k.ship).size()
 	k.show_event(k.engine.base_event("RC_CLONE"))
-	check("clone=true without clonebay: lost", own_names(k.ship).size(), kn - 1)
 	check("event text kept", k.dialog.text, "taken")
+	k.choose(0)
+	check("clone=true without clonebay: lost", own_names(k.ship).size(), kn - 1)
+	check("no clone box without a clonebay", k.phase, RunState.Phase.IDLE)
 
 
 func test_traitor() -> void:
@@ -175,6 +193,7 @@ func test_traitor() -> void:
 	var r := make_run()
 	r.show_event(r.engine.base_event("TRAITOR"))
 	var rw: Dictionary = r.dialog_rewards[0][2]
+	r.choose(0)
 	var hostile := r.ship.crew.filter(func(c): return not c.player_owned)
 	check("one hostile crew aboard", hostile.size(), 1)
 	check("same name", hostile[0].name_long, rw.name)
@@ -202,5 +221,6 @@ func test_pool_and_last() -> void:
 	for i in 3:
 		s.crew_seed = -1
 		s.show_event(s.engine.base_event("RC_GONE"))
+		s.choose(0)
 	check("all crew lost (nothing protects the last)", own_names(s.ship).size(), 0)
 	check("pool empty -> game over condition", s.crew_loss_pool().is_empty(), true)

@@ -133,16 +133,17 @@ func _run() -> void:
 	var parts0 := r2.ship.drone_parts
 	check("victory: destroyed outcome", r2.check_combat(es), "destroyed")
 	check("reward box open", r2.phase, RunState.Phase.DIALOG)
-	var gained := (r2.ship.scrap - scrap0) + (r2.ship.fuel - fuel0b) + (r2.ship.missiles - missiles0) \
-		+ (r2.ship.drone_parts - parts0)
-	check("victory gives resources (%s)" % str(r2.dialog_rewards), gained > 0 and not r2.dialog_rewards.is_empty(),
-		true)
-	check("listed rewards match the ship (scrap)", r2.ship.scrap - scrap0, r2.dialog_rewards.reduce(
-		func(a, x): return a + (int(x[1]) if x[0] == "scrap" else 0), 0))
+	var gained_f := func() -> int: return (r2.ship.scrap - scrap0) + (r2.ship.fuel - fuel0b) \
+		+ (r2.ship.missiles - missiles0) + (r2.ship.drone_parts - parts0)
+	check("victory box lists resources (%s), applied on Continue (PauseLoop)" % str(r2.dialog_rewards),
+		[not r2.dialog_rewards.is_empty(), gained_f.call()], [true, 0])
 	var rewards2 := r2.dialog_rewards.duplicate(true)
 	check("enemy done, not hostile", [r2.enemy.done, r2.has_hostile()], [true, false])
 	check("outcome only once", r2.check_combat(es), "")
 	close_dialogs(r2)
+	check("victory gives resources", gained_f.call() > 0, true)
+	check("listed rewards match the ship (scrap)", r2.ship.scrap - scrap0, rewards2.reduce(
+		func(a, x): return a + (int(x[1]) if x[0] == "scrap" else 0), 0))
 	check("FTL ready after the fight", r2.ship.ftl_charge, 1.0)
 	# Same ship seed -> same reward (seeded outcome event).
 	var r3 := RunState.new_run(31337)
@@ -460,12 +461,16 @@ func _run() -> void:
 	texted.choices[0].event.text = "bought"
 	rc.show_event(texted)
 	rc.choose(0)
+	var crew1 := rc.ship.crew.size()
+	var shown_rw: Array = rc.dialog_rewards.duplicate(true)  # built before ModifyResources (the box is open)
+	rc.choose(0)  # Continue: the crew member joins now
+	check("  with a text: joins on Continue", rc.ship.crew.size(), crew1 + 1)
 	newc = rc.ship.crew[-1]
-	var crw: Array = rc.dialog_rewards.filter(func(x): return String(x[0]) == "crew")
+	var crw: Array = shown_rw.filter(func(x): return String(x[0]) == "crew")
 	check("  reward entry carries the name", (crw[0][2] as Dictionary).get("name", "") if not crw.is_empty() else "",
 		newc.name_long)
 	var bx := EventBox.new()
-	var rres: Dictionary = bx._reward_resources(rc.dialog_rewards)
+	var rres: Dictionary = bx._reward_resources(shown_rw)
 	bx.free()
 	check("  ResourceBox gets the crew item and the scrap", [rres.has("crew"), int(rres.get("scrap", 0)) < 0],
 		[true, true])

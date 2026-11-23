@@ -55,6 +55,14 @@ const SRC := """
 	<choice><text>trade</text><event><item_modify><item type="fuel" min="4" max="4"/></item_modify></event></choice>
 	<choice><text>talk</text><event><text>they listen</text><ship hostile="true"/></event></choice>
 </event>
+<event name="TIMING">
+	<text>found</text>
+	<item_modify><item type="scrap" min="12" max="12"/><item type="fuel" min="-2" max="-2"/></item_modify>
+	<weapon name="LASER_BURST_1"/>
+	<damage amount="3"/>
+	<choice><text>buy</text><event><text>bought</text><item_modify><item type="scrap" min="-20" max="-20"/></item_modify></event></choice>
+	<choice><text>leave</text><event/></choice>
+</event>
 <event name="ALLGREY">
 	<text>poor</text>
 	<choice><text>a</text><event><item_modify><item type="scrap" min="-999" max="-999"/></item_modify></event></choice>
@@ -83,7 +91,7 @@ func _ready() -> void:
 
 func _run() -> void:
 	var db := make_db()
-	check("parsed events", db.events.size(), 16)
+	check("parsed events", db.events.size(), 17)
 	check("parsed lists", db.lists.size(), 4)
 
 	# --- list resolution (uniform pick), AE OVERRIDE_
@@ -206,10 +214,12 @@ func _run() -> void:
 	var scrap0 := r.ship.scrap
 	check("choose plain", r.choose(r.dialog_choices.find(by["plain"])), true)
 	check("sub-event shown", r.dialog.text, "next")
-	check("sub-event reward applied", r.ship.scrap - scrap0, 7)
-	check("dialog rewards listed", r.dialog_rewards, [["scrap", 7]])
+	check("sub-event reward listed, not applied while its box is open", [r.dialog_rewards, r.ship.scrap - scrap0],
+		[[["scrap", 7]], 0])
 	r.choose(0)  # continue
+	check("continue applies it (PauseLoop -> ModifyResources)", r.ship.scrap - scrap0, 7)
 	check("empty event closes the box", r.phase, RunState.Phase.IDLE)
+	_timing_checks(db)
 	r.ship.scrap = 0
 	r.show_event(r.engine.base_event("ALLGREY"))
 	check("all greyed -> first enabled", r.dialog_choices.map(func(v): return v.enabled), [true, false])
@@ -237,6 +247,39 @@ func _run() -> void:
 			ships += 1
 	check("HOSTILE1 events bring ships (%d/40)" % ships, ships > 10, true)
 
+
+
+## When the effects apply (rules/events.md §3.4): UpdateLocation's (hull damage, ...) when the box opens,
+## ModifyResources' (resources, items, ...) when a choice is picked; the reward box lists the event before it is
+## applied (raw amounts); the next box's affordability sees the totals after the parent's resources.
+func _timing_checks(db: EventDB) -> void:
+	print("Effect timing: box open vs choice")
+	var r := RunState.new()
+	r.engine = eng(db, 3)
+	r.ship = ShipState.new("PLAYER_SHIP_HARD", true)
+	r.ship.fuel = 5
+	r.ship.scrap = 10
+	AugmentRule.add(r.ship, "SCRAP_COLLECTOR")
+	var hull0 := r.ship.hull
+	var w0 := r.ship.weapons.size() + r.cargo.filter(func(n): return n != "").size()
+	r.show_event(r.engine.base_event("TIMING"))
+	check("open: hull damage applied (UpdateLocation)", r.ship.hull, hull0 - 3)
+	check("open: resources / weapon pending", [r.ship.scrap, r.ship.fuel,
+		r.ship.weapons.size() + r.cargo.filter(func(n): return n != "").size()], [10, 5, w0])
+	check("open: reward box = the event's raw amounts (no augment bonus)", r.dialog_rewards,
+		[["fuel", -2], ["scrap", 12], ["weapon", "LASER_BURST_1"], ["hull", -3]])
+	check("open: 'buy' (20 scrap) greyed on the pre-reward total", r.dialog_choices[0].enabled, false)
+	check("greyed: refused", r.choose(0), false)
+	r.choose(1)  # leave -> empty event: no box
+	check("choice: resources applied once (scrap +12 x 1.1 = 13)", [r.ship.scrap, r.ship.fuel], [23, 3])
+	check("choice: weapon received", r.ship.weapons.size() + r.cargo.filter(func(n): return n != "").size(), w0 + 1)
+	check("choice: hull not hit twice", r.ship.hull, hull0 - 3)
+	check("closed", r.phase, RunState.Phase.IDLE)
+	# A box whose only choice is Continue: the pending resources apply on Continue.
+	r.show_event(r.engine.base_event("MOD"))
+	check("single continue: pending while open", [r.dialog_choices.size(), r.ship.fuel], [1, 3])
+	r.choose(0)
+	check("single continue: applied on Continue", [r.ship.fuel, r.phase], [0, RunState.Phase.IDLE])
 
 
 ## An event (choice outcome) whose main text is empty opens no box (ChoiceBox::SetChoices 004edfb0: bOpen = false
