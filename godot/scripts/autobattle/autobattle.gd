@@ -416,6 +416,11 @@ func _poll_web_margins(delta: float) -> void:
 	if d is Dictionary and d != _web_margins:
 		_web_margins = d
 		_layout()
+	# Wallpaper Engine's FPS limit (applyGeneralProperties fps; 30 until it arrives): a lighter wallpaper. The
+	# simulation runs on fixed physics steps, so a lower frame rate only means fewer drawn frames.
+	var fps: Variant = JavaScriptBridge.eval("window.vortexFps || 0", true)
+	if fps != null and int(fps) > 0 and Engine.max_fps != int(fps):
+		Engine.max_fps = int(fps)
 
 
 func _process(delta: float) -> void:

@@ -187,7 +187,11 @@ GODOT_CONFIG['args'] = ['--main-pack', MAIN_PACK, '--audio-driver', 'Dummy'].con
 
 // Wallpaper Engine user properties (project.json sliders) -> window.vortexMargins, polled by the game.
 window.vortexMargins = null;
+window.vortexFps = 30;  // until Wallpaper Engine sends its FPS limit (Settings -> Performance)
 window.wallpaperPropertyListener = {
+	applyGeneralProperties: function (p) {
+		if (p.fps) window.vortexFps = Number(p.fps);
+	},
 	applyUserProperties: function (p) {
 		const m = window.vortexMargins || {};
 		for (const k of ['left', 'right', 'top', 'bottom']) {
