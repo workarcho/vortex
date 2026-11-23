@@ -199,6 +199,34 @@ func test_flak() -> void:
 	check("fake debris: no hull damage", en.ship.hull, hull)
 	check("  removed after flying through", p.dead, true)
 
+	print("Flak hover disc (CombatControl::UpdateAiming / RenderTarget): snapped to the hovered room centre")
+	var me_s := ShipState.new("PLAYER_SHIP_HARD", true)
+	me_s.weapons.clear()
+	var fw := weapon("SHOTGUN_PLAYER")
+	fw.powered = true
+	me_s.weapons.append(fw)
+	var wc := WeaponControl.new(me_s)
+	wc.select(0)
+	var rect: Rect2 = en.ship.room_rect(room)
+	var corner := rect.position + Vector2(3, 3)  # pointer near the room's corner, far from its centre
+	en.highlight_hover = true
+	en.hover_radius = int(fw.bp.radius)
+	en.mouse_world = corner
+	en.hovered_room = en.ship.room_at(corner)
+	check("pointer in the room", en.hovered_room, room)
+	check("disc centre = room centre, not the pointer", en.flak_hover_center(), rect.get_center())
+	wc.aim_at(en.ship, en.hovered_room)
+	check("  = where the click targets", fw.target_point, en.flak_hover_center())
+	en.mouse_world = Vector2(-5000, -5000)
+	en.hovered_room = en.ship.room_at(en.mouse_world)
+	check("pointer over no room: no disc (last room not kept)", en.flak_hover_center(), null)
+	en.hovered_room = room
+	en.hover_radius = 0
+	check("non-flak weapon: no disc", en.flak_hover_center(), null)
+	en.hover_radius = int(fw.bp.radius)
+	en.highlight_hover = false
+	check("not aiming: no disc", en.flak_hover_center(), null)
+
 
 func test_beam() -> void:
 	print("\nBeams")

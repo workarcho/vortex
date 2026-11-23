@@ -1939,7 +1939,7 @@ func _process(delta: float) -> void:
 		enemy_space.beam_preview_color = weapon_control.weapon(weapon_control.armed).bp.color
 		enemy_space.beam_preview_auto = player_space.ship.autofire != Input.is_key_pressed(KEY_SHIFT)
 	enemy_space.beam_preview = preview
-	# Flak armed: translucent red disc of its radius under the pointer (CombatControl::RenderTarget).
+	# Flak armed: translucent red disc of its radius on the hovered room centre (CombatControl::RenderTarget).
 	var armed_w: WeaponState = weapon_control.weapon(weapon_control.armed) if weapon_control.armed >= 0 else null
 	enemy_space.hover_radius = int(armed_w.bp.get("radius", 0)) if armed_w and not armed_w.is_beam() else 0
 	_combat_tooltips()

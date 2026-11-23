@@ -15,7 +15,7 @@ var move_highlight_room := -1  # crew move destination under the pointer (CrewCo
 var aim_marks: Array = []  # [{room, label, beam: [p1, p2] (beams only)}] weapons aiming at this ship
 var beam_preview: Array = []  # [start] or [start, end]: beam being aimed (player UI)
 var beam_preview_color := Color8(227, 39, 39)
-var hover_radius := 0  # armed flak: radius disc drawn under the pointer
+var hover_radius := 0  # armed flak: radius disc drawn on the hovered room centre (flak_hover_center)
 var beam_preview_auto := false  # the beam being aimed will autofire (yellow line)
 var mouse_world := Vector2.ZERO  # pointer in this space's coordinates (last motion / click)
 var show_power := false  # player sensors ≥ 3: this ship's power is visible
@@ -227,11 +227,23 @@ static func beam_rooms(target: ShipState, a: Vector2, b: Vector2) -> Array[int]:
 	return out
 
 
+## Centre of the armed flak's hover disc, or null when none is drawn. CombatControl::UpdateAiming (0x564050)
+## sets potentialAiming = ShipManager::GetRoomCenter(selectedRoom) for every non-beam weapon, (-1, -1) when the
+## pointer is over no room (UpdateTarget 0x564700: selectedRoom = Ship::GetSelectedRoomId(pointer), no memory of
+## the last room); CombatControl::RenderTarget (0x55ff00) draws GL_DrawCircle(potentialAiming, radius) only when
+## potentialAiming is valid. So the disc snaps to the hovered room's centre, the same point a click targets.
+func flak_hover_center() -> Variant:
+	if not highlight_hover or hovered_room < 0 or not beam_preview.is_empty() or hover_radius <= 0:
+		return null
+	return ship.room_rect(hovered_room).get_center()
+
+
 func _draw_overlay() -> void:
 	var font := ThemeDB.fallback_font
-	# Room outlines are drawn by the ShipView (highlighted_rooms); flak radius disc under the pointer.
-	if highlight_hover and hovered_room >= 0 and beam_preview.is_empty() and hover_radius > 0:
-		overlay.draw_circle(mouse_world, float(hover_radius), Color(1, 0, 0, 0.5))
+	# Room outlines are drawn by the ShipView (highlighted_rooms); flak radius disc on the hovered room.
+	var flak_at: Variant = flak_hover_center()
+	if flak_at != null:
+		overlay.draw_circle(flak_at, float(hover_radius), Color(1, 0, 0, 0.5))
 	# Beam being aimed (CombatControl::RenderTarget -> WeaponControl::RenderBeamAiming): every room the line
 	# crosses is highlighted, then the aim line from the first point to the pointer (fixed length), red, or
 	# yellow when it will autofire.
