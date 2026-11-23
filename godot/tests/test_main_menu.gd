@@ -93,6 +93,14 @@ func _test_menu() -> void:
 	check("buttons right-aligned at x 1200 (1.6.14)", [v.button_rect(0).end.x, v.button_rect(6).end.x],
 		[1200.0, 1200.0])
 	check("Continue y 275, Quit y 623", [v.button_rect(0).position.y, v.button_rect(6).position.y], [275.0, 623.0])
+	# [ours] PC: CREATE HTML WALLPAPER in the bottom-left corner (tests/test_wallpaper_maker.gd: its action), under
+	# the profile window, shown with the menu.
+	var wb: WallpaperButton = sc.wallpaper_button
+	check("PC: wallpaper button", wb != null and wb.button.label == "CREATE HTML WALLPAPER", true)
+	if wb != null:
+		check("wallpaper button bottom-left", [wb.button.rect.position.x, wb.button.rect.end.y], [14.0, 708.0])
+		check("wallpaper button under the profile window", wb.get_index() < sc.profile_view.get_index(), true)
+		check("wallpaper button default folder", wb.maker.dest_dir, WallpaperMaker.default_dest_dir())
 	v.hover(_centre(v, TitleState.MENU_CONTINUE))
 	check("disabled Continue tooltip = no_load", v.tooltip_text_now(), FtlData.tr_id("no_load"))
 	v.press(_centre(v, TitleState.MENU_CONTINUE))

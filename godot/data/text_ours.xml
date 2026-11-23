@@ -24,4 +24,11 @@
 <text name="profile_close">CLOSE</text>
 <text name="profile_unlock_confirm">Unlock every ship and layout in this profile?\n\nYou will skip the unlock progression and may spoil ships you have not discovered yet. This cannot be undone.</text>
 <text name="profile_delete_confirm">Delete this profile?\n\nIts unlocks, achievements, scores, statistics and saved run will be lost. This cannot be undone.</text>
+<text name="wallpaper_button">CREATE HTML WALLPAPER</text>  <!-- Main menu corner button, PC only (WallpaperButton, WallpaperMaker) -->
+<text name="wallpaper_button_busy">CREATING WALLPAPER \1%</text>
+<text name="wallpaper_creating">Creating the wallpaper...</text>
+<text name="wallpaper_created">Wallpaper created: \1</text>
+<text name="wallpaper_opened">Wallpaper folder: \1</text>
+<text name="wallpaper_no_template">This build has no wallpaper template (web-wallpaper folder next to the game).</text>
+<text name="wallpaper_failed">Could not create the wallpaper: \1</text>
 </FTL>

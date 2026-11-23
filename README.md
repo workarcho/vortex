@@ -30,6 +30,24 @@ Android 8+ is required. The Windows version needs no installation: unzip and run
 - Holding a finger on anything shows its tooltip.
 - Options → *Phone / Unfolded Screen Layout* switches between the available layouts.
 
+## Live wallpaper (Wallpaper Engine)
+
+The PC version can turn its autobattle demo (two AI ships fighting forever, muted) into a web wallpaper for
+[Wallpaper Engine](https://www.wallpaperengine.io):
+
+1. In the main menu, click **CREATE HTML WALLPAPER** (bottom left). The first time it builds the wallpaper from
+   the `web-wallpaper/` folder shipped next to the game and your FTL data (a few seconds), then opens its folder:
+   `%APPDATA%\Godot\app_userdata\FTL Proto\wallpaper\Vortex Autobattle\`. Later clicks just open the folder (it is
+   rebuilt after a game update).
+2. In Wallpaper Engine: **Create Wallpaper** → choose `index.html` in that folder.
+3. The wallpaper's settings have margin sliders to keep the battle clear of desktop icons and the taskbar; the
+   frame rate follows Wallpaper Engine's FPS limit.
+
+The folder contains your FTL data: keep it to yourself (no Workshop upload). Developers: `python
+tools/build_web_wallpaper.py` makes the data-less template (`build/web-wallpaper-template/`, used by the button
+when running from the editor) and a ready wallpaper under `build/wallpaper/`; `--release` also assembles
+`build/release/Vortex-windows.zip` (exe + pck + `web-wallpaper/`).
+
 ## Status
 
 Most of the game is playable from the hangar to the Rebel Flagship: combat, crew, systems, events, stores,

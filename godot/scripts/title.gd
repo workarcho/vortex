@@ -32,6 +32,7 @@ var profile: InputProfile
 var hud_root: Control
 var menu_view: MainMenuView
 var profile_view: ProfileView
+var wallpaper_button: WallpaperButton  # [ours] PC only (null on touch / mobile / web)
 var credits: CreditScreen  # main menu CREDITS (same screen as the victory credits)
 var hangar_view: HangarView
 var options: OptionsScreen  # our QoL / mod options (MOD OPTIONS button of the vanilla window)
@@ -125,6 +126,11 @@ func _build() -> void:
 	menu_view = MainMenuView.new()
 	menu_view.setup(title, profile)
 	hud_root.add_child(menu_view)
+	# [ours] local Wallpaper Engine wallpaper, bottom-left corner; PC only, under the profile window
+	if not touch and not OS.has_feature("mobile") and not OS.has_feature("web"):
+		wallpaper_button = WallpaperButton.new()
+		hud_root.add_child(wallpaper_button)
+		wallpaper_button.setup(menu_view, func(t: String) -> void: show_toast(t, 6.0))
 	profile_view = ProfileView.new()  # [ours] three profiles, corner button at the top left
 	hud_root.add_child(profile_view)
 	profile_view.setup(title, menu_view)
@@ -146,8 +152,10 @@ func _build() -> void:
 	vanilla_options.mod_options.connect(func(): options.show_screen())
 	toast = Label.new()
 	toast.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	toast.position = Vector2(340, 660)
-	toast.size = Vector2(600, 30)
+	toast.position = Vector2(190, 640)  # bottom line at y ~690 (a long one wraps upwards)
+	toast.size = Vector2(900, 50)
+	toast.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	toast.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	toast.add_theme_font_size_override("font_size", 18)
 	toast.add_theme_color_override("font_outline_color", Color.BLACK)
 	toast.add_theme_constant_override("outline_size", 6)
@@ -300,11 +308,11 @@ func _consume(p: String) -> void:
 		_start_run(title.run_config())
 
 
-func show_toast(t: String) -> void:
+func show_toast(t: String, secs := 2.5) -> void:
 	toast.text = t
 	toast.visible = true
 	toast.modulate.a = 1.0
-	_toast_t = 2.5
+	_toast_t = secs
 
 
 ## Continue (finalChoice 9 → WorldManager::LoadGame): the saved run becomes RunState.current and main.tscn
