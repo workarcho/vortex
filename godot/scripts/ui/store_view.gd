@@ -519,6 +519,8 @@ func _block(font: int, t: String, p: Vector2, col: Color, wrap: int) -> int:
 func _reason_text(key: String) -> String:
 	if key == "scrap" or key == "not enough scrap":
 		return "Not enough scrap."
+	if key.begins_with("have_"):  # AugmentRule.can_add: "have_<id>" -> text `have_augment` (already owned, not stackable)
+		key = "have_augment"
 	var t := FtlData.tr_id(key)
 	return t if t != key else key.replace("_", " ")
 
