@@ -329,24 +329,39 @@ static func hud_scale(vis: Vector2) -> float:
 	return clampf(floorf(minf(vis.y / 720.0, vis.x / 1280.0) * 4.0) / 4.0, 1.0, 3.0)
 
 
+## Safe area in screen pixels (project settings ftl/autobattle/margin_left|right|top|bottom, e.g. from the
+## wallpaper build's override.cfg): keeps the HUDs and ships clear of desktop icons / a side taskbar. The backdrop
+## still covers the whole canvas. Returned in canvas units (left, top, right, bottom).
+func safe_margins(vis: Vector2) -> Array:
+	var win := Vector2(get_window().size)
+	var f := vis.x / win.x if win.x > 0.0 else 1.0
+	var out := []
+	for k in ["left", "top", "right", "bottom"]:
+		out.append(maxf(float(ProjectSettings.get_setting("ftl/autobattle/margin_" + k, 0)), 0.0) * f)
+	return out
+
+
 func _layout() -> void:
 	if left == null or not is_inside_tree():
 		return
-	var vis := get_viewport().get_visible_rect().size
+	var full := get_viewport().get_visible_rect().size
+	var m := safe_margins(full)
+	var off := Vector2(m[0], m[1])
+	var vis := Vector2(maxf(full.x - m[0] - m[2], 320.0), maxf(full.y - m[1] - m[3], 240.0))
 	root_ctrl.position = Vector2.ZERO
-	root_ctrl.size = vis
-	# Backdrop: the 1280 × 720 beacon picture scaled to cover the canvas, centred.
-	var cs := maxf(vis.x / HudLayout.FRAME.x, vis.y / HudLayout.FRAME.y)
+	root_ctrl.size = full
+	# Backdrop: the 1280 × 720 beacon picture scaled to cover the whole canvas, centred.
+	var cs := maxf(full.x / HudLayout.FRAME.x, full.y / HudLayout.FRAME.y)
 	backdrop.size = HudLayout.FRAME
 	backdrop.scale = Vector2(cs, cs)
-	backdrop.position = ((vis - HudLayout.FRAME * cs) / 2.0).round()
+	backdrop.position = ((full - HudLayout.FRAME * cs) / 2.0).round()
 	overlay.position = Vector2.ZERO
-	overlay.size = vis
+	overlay.size = full
 	var k := hud_scale(vis)
 	left_hud.scale = Vector2(k, k)
 	right_hud.scale = Vector2(k, k)
-	left_hud.position = Vector2(EDGE, EDGE).round()
-	right_hud.position = Vector2(vis.x - EDGE - AutobattleHud.WIDTH * k, EDGE).round()
+	left_hud.position = (off + Vector2(EDGE, EDGE)).round()
+	right_hud.position = (off + Vector2(vis.x - EDGE - AutobattleHud.WIDTH * k, EDGE)).round()
 	# Ships: each in its half, clear of its HUD column, both at the zoom the tighter one allows.
 	var half := roundf(vis.x / 2.0)
 	var col := EDGE + (maxf(left_hud.column_width(), right_hud.column_width()) + 8.0) * k
@@ -368,10 +383,11 @@ func _layout() -> void:
 		var rot: float = e[1]
 		var b: Rect2 = e[2]
 		var on_left := sp == left
-		sp.position = Vector2(0 if on_left else half, 0)
-		sp.size = Vector2(half if on_left else vis.x - half, vis.y)
-		var cx := col + area_w / 2.0 if on_left else MID_GAP + area_w / 2.0
-		var centre := Vector2(roundf(cx), roundf(vis.y / 2.0))
+		var split := off.x + half  # the halves meet at the centre of the safe area; each covers the canvas edge
+		sp.position = Vector2(0 if on_left else split, 0)
+		sp.size = Vector2(split if on_left else full.x - split, full.y)
+		var cx := off.x + col + area_w / 2.0 if on_left else MID_GAP + area_w / 2.0
+		var centre := Vector2(roundf(cx), roundf(off.y + vis.y / 2.0))
 		sp.fixed_rotation = rot
 		sp.set_fixed_origin((centre - b.get_center().rotated(-rot) * z).round(), z)
 
