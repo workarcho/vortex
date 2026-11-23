@@ -31,9 +31,27 @@ static func user_data_dir() -> String:
 	return OS.get_user_data_dir().path_join("ftl-data")
 
 
+## Web build (the local wallpaper, tools/build_web_wallpaper.py): the HTML shell preloads this resource pack into
+## the browser's in-memory file system; it holds the player's ftl-data under res://ftl-data/ (raw files, read
+## through FileAccess / Image.load_from_file like the folder on disk).
+const WEB_PACK := "/ftl-data.pck"
+const WEB_PACK_ROOT := "res://ftl-data"
+
+
+## res://ftl-data once the web data pack is mounted (loaded on first call), else "".
+static func _web_pack_root() -> String:
+	if not OS.has_feature("web"):
+		return ""
+	if not DirAccess.dir_exists_absolute(WEB_PACK_ROOT):
+		if not FileAccess.file_exists(WEB_PACK) or not ProjectSettings.load_resource_pack(WEB_PACK, false):
+			return ""
+	return WEB_PACK_ROOT
+
+
 func _find_root() -> String:
 	data_problem_text = ""
 	var candidates := [
+		_web_pack_root(),
 		OS.get_environment("FTL_DATA"),
 		ProjectSettings.globalize_path("res://").path_join("../ftl-data"),
 		OS.get_executable_path().get_base_dir().path_join("ftl-data"),  # exported PC build: next to the exe

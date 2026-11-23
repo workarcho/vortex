@@ -76,8 +76,9 @@ func _ready() -> void:
 		FrameHost.change_scene(get_tree(), DATA_SETUP_SCENE)
 		return
 	# --autobattle, or the project setting ftl/autobattle/start (an override.cfg next to the exported exe: the
-	# wallpaper build, which cannot pass command-line arguments everywhere).
-	if args.has("--autobattle") or bool(ProjectSettings.get_setting("ftl/autobattle/start", false)):
+	# wallpaper build, which cannot pass command-line arguments everywhere; or its `wallpaper` feature tag override
+	# in project.godot: the web wallpaper build).
+	if args.has("--autobattle") or ProjectSettings.get_setting_with_override("ftl/autobattle/start") == true:
 		FrameHost.change_scene(get_tree(), AUTOBATTLE_SCENE)
 		return
 	if skips_menu(args):

@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0">
+		<title>$GODOT_PROJECT_NAME</title>
+		<!--
+		Custom HTML shell of the "Web" export preset: the autobattle demo as a local Wallpaper Engine web wallpaper
+		(tools/build_web_wallpaper.py). Differences from Godot's default shell:
+		- a fetch() shim for file:// pages (Wallpaper Engine's CEF rejects fetch() on file: URLs; XHR works);
+		- the player's FTL data comes in a second resource pack (ftl-data.pck, built locally, never published),
+		  preloaded into the in-memory file system as /ftl-data.pck and mounted by FtlData (scripts/ftl_data.gd);
+		- no audio driver (the wallpaper is muted), the canvas fills the window, a minimal black loading screen.
+		-->
+		<style>
+html, body, #canvas {
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+html, body {
+	width: 100%;
+	height: 100%;
+}
+
+body {
+	color: #c8c8c8;
+	background-color: black;
+	overflow: hidden;
+	touch-action: none;
+}
+
+#canvas {
+	display: block;
+	width: 100%;
+	height: 100%;
+}
+
+#canvas:focus {
+	outline: none;
+}
+
+#status {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	align-items: center;
+	background-color: black;
+	font-family: Arial, sans-serif;
+	font-size: 14px;
+}
+
+#status-progress {
+	width: 30%;
+	height: 4px;
+	background: #222;
+}
+
+#status-bar {
+	width: 0;
+	height: 100%;
+	background: #8c8c8c;
+}
+
+#status-notice {
+	display: none;
+	max-width: 60%;
+	margin-top: 1rem;
+	white-space: pre-wrap;
+	text-align: center;
+	color: #e08080;
+}
+		</style>
+		<script>
+// Wallpaper Engine loads the page from file:///, where its fetch() rejects file: URLs while XMLHttpRequest still
+// works (status 0). Godot's loader fetches the .wasm and the .pck files with fetch(): route file: URLs through XHR
+// and hand back a Response (application/wasm for the engine, so WebAssembly.instantiateStreaming accepts it).
+(function () {
+	if (location.protocol !== 'file:' || typeof window.fetch !== 'function') {
+		return;
+	}
+	// The engine's PWA hook asks for a service worker registration, which file: pages never have: drop that
+	// (harmless) rejection instead of logging an uncaught error.
+	window.addEventListener('unhandledrejection', function (e) {
+		if (e.reason && e.reason.name === 'SecurityError' && /ServiceWorker/.test(String(e.reason.message))) {
+			e.preventDefault();
+		}
+	});
+	const nativeFetch = window.fetch.bind(window);
+	function xhrResponse(url) {
+		return new Promise(function (resolve, reject) {
+			const xhr = new XMLHttpRequest();
+			xhr.open('GET', url, true);
+			xhr.responseType = 'arraybuffer';
+			xhr.onload = function () {
+				if ((xhr.status === 0 || (xhr.status >= 200 && xhr.status < 300)) && xhr.response) {
+					const type = /\.wasm([?#]|$)/i.test(url) ? 'application/wasm' : 'application/octet-stream';
+					resolve(new Response(xhr.response, { status: 200, headers: { 'Content-Type': type } }));
+				} else {
+					reject(new TypeError(`Failed to load ${url} (XHR status ${xhr.status})`));
+				}
+			};
+			xhr.onerror = function () {
+				reject(new TypeError(`Failed to load ${url} (XHR error)`));
+			};
+			xhr.send(null);
+		});
+	}
+	window.fetch = function (input, init) {
+		let url = null;
+		try {
+			url = new URL(typeof input === 'string' ? input : input.url, document.baseURI);
+		} catch (e) { /* not a URL: let the native fetch decide */ }
+		if (url !== null && url.protocol === 'file:') {
+			return xhrResponse(url.href);
+		}
+		return nativeFetch(input, init);
+	};
+}());
+		</script>
+		$GODOT_HEAD_INCLUDE
+	</head>
+	<body>
+		<canvas id="canvas">
+			Your browser does not support the canvas tag.
+		</canvas>
+
+		<noscript>
+			Your browser does not support JavaScript.
+		</noscript>
+
+		<div id="status">
+			<div id="status-progress"><div id="status-bar"></div></div>
+			<div id="status-notice"></div>
+		</div>
+
+		<script src="$GODOT_URL"></script>
+		<script>
+const GODOT_CONFIG = $GODOT_CONFIG;
+const GODOT_THREADS_ENABLED = $GODOT_THREADS_ENABLED;
+// The data pack: its size (filled in by tools/build_web_wallpaper.py) lets the progress bar count it.
+const FTL_DATA_PACK = 'ftl-data.pck';
+const FTL_DATA_PACK_SIZE = Number('__FTL_DATA_PACK_SIZE__') || 0;
+GODOT_CONFIG['fileSizes'] = Object.assign({}, GODOT_CONFIG['fileSizes'], { [FTL_DATA_PACK]: FTL_DATA_PACK_SIZE });
+// Engine.startGame() without its shortcut: the main pack AND the data pack must both be preloaded before start(),
+// which copies every preloaded file into the file system once.
+const MAIN_PACK = GODOT_CONFIG['mainPack'] || `${GODOT_CONFIG['executable']}.pck`;
+// Muted wallpaper: no audio driver at all (no AudioContext, no autoplay prompts, no worklet loads).
+GODOT_CONFIG['args'] = ['--main-pack', MAIN_PACK, '--audio-driver', 'Dummy'].concat(GODOT_CONFIG['args'] || []);
+
+(function () {
+	const status = document.getElementById('status');
+	const bar = document.getElementById('status-bar');
+	const notice = document.getElementById('status-notice');
+
+	function fail(err) {
+		console.error(err);
+		notice.textContent = (err instanceof Error) ? err.message : String(err || 'An unknown error occurred.');
+		notice.style.display = 'block';
+	}
+
+	const missing = Engine.getMissingFeatures({ threads: GODOT_THREADS_ENABLED });
+	if (missing.length !== 0) {
+		fail('The following features required to run Godot projects on the Web are missing:\n' + missing.join('\n'));
+		return;
+	}
+	GODOT_CONFIG['onProgress'] = function (current, total) {
+		if (current > 0 && total > 0) {
+			bar.style.width = `${Math.min(100, (100 * current) / total)}%`;
+		}
+	};
+	const engine = new Engine(GODOT_CONFIG);
+	Promise.all([
+		engine.init(GODOT_CONFIG['executable']),
+		engine.preloadFile(MAIN_PACK, MAIN_PACK),
+		engine.preloadFile(FTL_DATA_PACK, '/ftl-data.pck'),
+	]).then(function () {
+		return engine.start();
+	}).then(function () {
+		status.remove();
+	}, fail);
+}());
+		</script>
+	</body>
+</html>

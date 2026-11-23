@@ -71,7 +71,8 @@ var _saved_aspect := Window.CONTENT_SCALE_ASPECT_EXPAND
 func _ready() -> void:
 	stats = {"rounds_started": 0, "rounds_ended": 0, "reasons": [], "fired": {true: 0, false: 0},
 		"powered": {true: false, false: false}, "damaged": {true: false, false: false}, "matchups": []}
-	if bool(ProjectSettings.get_setting("ftl/autobattle/mute", false)):  # wallpaper build (override.cfg)
+	# Wallpaper builds: override.cfg (PC) or the `wallpaper` feature tag override in project.godot (web).
+	if ProjectSettings.get_setting_with_override("ftl/autobattle/mute") == true:
 		FtlData.muted = true
 	for a in OS.get_cmdline_user_args():
 		if a == "--mute":
@@ -337,7 +338,8 @@ func safe_margins(vis: Vector2) -> Array:
 	var f := vis.x / win.x if win.x > 0.0 else 1.0
 	var out := []
 	for k in ["left", "top", "right", "bottom"]:
-		out.append(maxf(float(ProjectSettings.get_setting("ftl/autobattle/margin_" + k, 0)), 0.0) * f)
+		var v: Variant = ProjectSettings.get_setting_with_override("ftl/autobattle/margin_" + k)  # feature overrides
+		out.append(maxf(float(v) if v != null else 0.0, 0.0) * f)
 	return out
 
 

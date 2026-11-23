@@ -37,6 +37,16 @@ window/handheld/orientation=4
 
 display/frame_scaling="sharp"
 hangar/unlock_all_ships=false
+autobattle/start=false
+autobattle/start.wallpaper=true
+autobattle/mute=false
+autobattle/mute.wallpaper=true
+autobattle/margin_left=0
+autobattle/margin_left.wallpaper=380
+autobattle/margin_right=0
+autobattle/margin_right.wallpaper=160
+autobattle/margin_top=0
+autobattle/margin_bottom=0
 
 [rendering]
 
