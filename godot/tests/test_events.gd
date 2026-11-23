@@ -49,6 +49,12 @@ const SRC := """
 	<choice><text>steal</text><event><item_modify steal="true"><item type="fuel" min="-50" max="-50"/></item_modify></event></choice>
 	<choice><text>close</text><event/></choice>
 </event>
+<event name="REFUSE">
+	<text>hand one over</text>
+	<choice><text>never</text><event><ship hostile="true"/></event></choice>
+	<choice><text>trade</text><event><item_modify><item type="fuel" min="4" max="4"/></item_modify></event></choice>
+	<choice><text>talk</text><event><text>they listen</text><ship hostile="true"/></event></choice>
+</event>
 <event name="ALLGREY">
 	<text>poor</text>
 	<choice><text>a</text><event><item_modify><item type="scrap" min="-999" max="-999"/></item_modify></event></choice>
@@ -77,7 +83,7 @@ func _ready() -> void:
 
 func _run() -> void:
 	var db := make_db()
-	check("parsed events", db.events.size(), 15)
+	check("parsed events", db.events.size(), 16)
 	check("parsed lists", db.lists.size(), 4)
 
 	# --- list resolution (uniform pick), AE OVERRIDE_
@@ -207,6 +213,7 @@ func _run() -> void:
 	r.ship.scrap = 0
 	r.show_event(r.engine.base_event("ALLGREY"))
 	check("all greyed -> first enabled", r.dialog_choices.map(func(v): return v.enabled), [true, false])
+	_no_text_checks(r)
 	_boarder_checks(r)
 
 	# --- the user's data
@@ -230,6 +237,56 @@ func _run() -> void:
 			ships += 1
 	check("HOSTILE1 events bring ships (%d/40)" % ships, ships > 10, true)
 
+
+
+## An event (choice outcome) whose main text is empty opens no box (ChoiceBox::SetChoices 004edfb0: bOpen = false
+## for mainText ""); its effects still apply. Then the user's data: every outcome our engine resolves to an empty
+## text has no <text> in the XML (no unresolved id / list) and no choices of its own.
+func _no_text_checks(r: RunState) -> void:
+	print("Outcome events without text (no box)")
+	r.enemy = {"hostile": false, "done": false}
+	r.show_event(r.engine.base_event("REFUSE"))
+	check("refuse: box with 3 choices", [r.phase, r.dialog_choices.size()], [RunState.Phase.DIALOG, 3])
+	check("never: no text, no box", [r.choose(0), r.phase, r.dialog.is_empty()], [true, RunState.Phase.IDLE, true])
+	check("never: the ship turns hostile", r.enemy.hostile, true)
+	r.enemy = {"hostile": false, "done": false}
+	r.show_event(r.engine.base_event("REFUSE"))
+	var fuel0 := r.ship.fuel
+	r.choose(1)
+	check("trade: no box, fuel applied", [r.phase, r.ship.fuel - fuel0], [RunState.Phase.IDLE, 4])
+	r.show_event(r.engine.base_event("REFUSE"))
+	r.choose(2)
+	check("talk: text -> box with one continue", [r.phase, r.dialog.text, r.dialog_choices.size(),
+		r.enemy.hostile], [RunState.Phase.DIALOG, "they listen", 1, true])
+	r.choose(0)
+	r.enemy = {}
+	var real := EventDB.shared()
+	var re := EventEngine.new(real)
+	re.rng.seed = 7
+	var slaver := re.base_event("PIRATE_SLAVER")
+	var refuse: Dictionary = slaver.choices[1].event
+	check("data: PIRATE_SLAVER refuse outcome has no text, only the hostile flip", [refuse.text,
+		refuse.ship.get("hostile_only", false), bool(refuse.ship.get("hostile", false))], ["", true, true])
+	var bad := []
+	var seen := [0]
+	for n in real.events:
+		re.clear_sector()  # unique events / text lists never run out during the scan
+		_scan_outcomes(re, re.base_event(n), String(n), 0, bad, seen)
+	check("data: %d text-less outcomes, none with own choices or an unresolved text" % seen[0], bad, [])
+	check("data: some text-less hostile outcomes exist", seen[0] > 20, true)
+
+
+func _scan_outcomes(re: EventEngine, ev: Dictionary, path: String, depth: int, bad: Array, seen: Array) -> void:
+	if ev.is_empty() or depth > 6:
+		return
+	if String(ev.text) == "" and ev.get("content", false):
+		seen[0] += 1
+		if ev.choices.size() != 1 or not ev.choices[0].event.is_empty():
+			bad.append(path + ": choices behind a text-less event")
+	elif String(ev.text).begins_with("event_") or String(ev.text).begins_with("text_"):
+		bad.append(path + ": unresolved text id " + String(ev.text))
+	for i in ev.choices.size():
+		_scan_outcomes(re, ev.choices[i].event, "%s/c%d" % [path, i + 1], depth + 1, bad, seen)
 
 
 ## <boarders> (WorldManager::AddBoarders / CompleteShip::AddBoarders) and a choice outcome's <environment>.

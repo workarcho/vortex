@@ -448,13 +448,19 @@ func _run() -> void:
 	rc.ship.scrap = 100
 	var slaver := rc.engine.base_event("FRIENDLY_SLAVER")
 	var named := slaver.duplicate(true)  # unique event: keep a copy for the named-crew check
+	var texted := slaver.duplicate(true)  # the same outcome with a text, for the reward box checks
 	rc.show_event(slaver)
 	var crew0 := rc.ship.crew.size()
 	rc.choose(0)
 	check("slaver event adds a crew member", rc.ship.crew.size(), crew0 + 1)
+	check("  the outcome has no text: no box (ChoiceBox::SetChoices)", rc.phase, RunState.Phase.IDLE)
 	var newc: CrewMember = rc.ship.crew[-1]
 	check("  it has a name, not the race", newc.name_long != "", true)
 	check("  placed in the pilot room", newc.room, rc.ship.sys("pilot").room)
+	texted.choices[0].event.text = "bought"
+	rc.show_event(texted)
+	rc.choose(0)
+	newc = rc.ship.crew[-1]
 	var crw: Array = rc.dialog_rewards.filter(func(x): return String(x[0]) == "crew")
 	check("  reward entry carries the name", (crw[0][2] as Dictionary).get("name", "") if not crw.is_empty() else "",
 		newc.name_long)

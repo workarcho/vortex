@@ -880,6 +880,17 @@ func show_event(ev: Dictionary) -> void:
 			"max_group": -1, "blue": false, "hidden": true, "event": {}}]
 		dialog_choices = choice_views(dialog)
 		dialog_rewards = []
+	if String(dialog.get("text", "")) == "":
+		# ChoiceBox::SetChoices (004edfb0, via CreateChoiceBox -> CommandGui::NewLocation): bOpen = true, then
+		# bOpen = false when the main text (after the quest / unlock / intruder appends) is "": an outcome without
+		# text (e.g. `<event><ship hostile="true"/></event>`, the attack / refuse choices) opens no box; its
+		# effects are applied all the same (CreateChoiceBox calls ModifyResources at once for an empty text).
+		_log("event %s (no text: no box)" % ev.name)
+		var secret: bool = ev.get("secret_sector", false)
+		_close_dialog()
+		if secret and map != null and tree != null:
+			start_secret_sector()
+		return
 	phase = Phase.DIALOG
 	_log("event %s" % ev.name)
 	if ev.get("secret_sector", false) and map != null and tree != null:
