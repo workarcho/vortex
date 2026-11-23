@@ -18,3 +18,8 @@ __pycache__/
 
 # Research notes (kept local)
 rules/
+NOTES.md
+tools/ghidra/
+tools/rdconst.py
+tools/font_dump.py
+tools/compose_cmp.gd
