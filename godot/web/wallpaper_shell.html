@@ -185,6 +185,18 @@ GODOT_CONFIG['args'] = ['--main-pack', MAIN_PACK, '--audio-driver', 'Dummy'].con
 	}, fail);
 }());
 
+// Wallpaper Engine user properties (project.json sliders) -> window.vortexMargins, polled by the game.
+window.vortexMargins = null;
+window.wallpaperPropertyListener = {
+	applyUserProperties: function (p) {
+		const m = window.vortexMargins || {};
+		for (const k of ['left', 'right', 'top', 'bottom']) {
+			if (p['margin' + k]) m[k] = Number(p['margin' + k].value);
+		}
+		window.vortexMargins = m;
+	},
+};
+
 // Diagnostics for the first 20 s: page size, device pixel ratio and the canvas backing size (low-resolution check).
 function showSizeInfo() {
 	const box = document.createElement('div');

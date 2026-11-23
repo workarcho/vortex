@@ -337,8 +337,11 @@ func safe_margins(vis: Vector2) -> Array:
 	var win := Vector2(get_window().size)
 	var f := vis.x / win.x if win.x > 0.0 else 1.0
 	var out := []
+	var web := _web_margins
 	for k in ["left", "top", "right", "bottom"]:
 		var v: Variant = ProjectSettings.get_setting_with_override("ftl/autobattle/margin_" + k)  # feature overrides
+		if web.has(k):  # Wallpaper Engine sliders (web build, window.vortexMargins) win
+			v = web[k]
 		out.append(maxf(float(v) if v != null else 0.0, 0.0) * f)
 	return out
 
@@ -396,7 +399,27 @@ func _layout() -> void:
 
 # ------------------------------------------------------------------ frame: cursor, keys, music, banner
 
+var _web_margins := {}
+var _web_poll := 0.0
+
+
+## Web wallpaper: Wallpaper Engine's margin sliders arrive in window.vortexMargins (web/wallpaper_shell.html).
+func _poll_web_margins(delta: float) -> void:
+	if not OS.has_feature("web"):
+		return
+	_web_poll -= delta
+	if _web_poll > 0.0:
+		return
+	_web_poll = 0.5
+	var raw: Variant = JavaScriptBridge.eval("JSON.stringify(window.vortexMargins || {})", true)
+	var d: Variant = JSON.parse_string(String(raw)) if raw != null else null
+	if d is Dictionary and d != _web_margins:
+		_web_margins = d
+		_layout()
+
+
 func _process(delta: float) -> void:
+	_poll_web_margins(delta)
 	_idle += delta / maxf(Engine.time_scale, 0.001)
 	if _idle > CURSOR_IDLE and Input.mouse_mode == Input.MOUSE_MODE_VISIBLE and DisplayServer.get_name() != "headless":
 		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN

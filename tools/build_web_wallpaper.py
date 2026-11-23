@@ -68,6 +68,18 @@ def main():
         "title": TITLE,
         "type": "web",
         "visibility": "private",
+        # User properties (sliders in Wallpaper Engine's panel), read by the shell's wallpaperPropertyListener and
+        # passed to the game as window.vortexMargins (autobattle.gd safe_margins).
+        "general": {"properties": {
+            "marginleft": {"order": 0, "text": "Left margin (px)", "type": "slider", "min": 0, "max": 1000,
+                           "value": 250, "fraction": False},
+            "marginright": {"order": 1, "text": "Right margin (px)", "type": "slider", "min": 0, "max": 1000,
+                            "value": 120, "fraction": False},
+            "margintop": {"order": 2, "text": "Top margin (px)", "type": "slider", "min": 0, "max": 600,
+                          "value": 0, "fraction": False},
+            "marginbottom": {"order": 3, "text": "Bottom margin (px)", "type": "slider", "min": 0, "max": 600,
+                             "value": 0, "fraction": False},
+        }},
     }
     if os.path.isfile(os.path.join(a.out, "preview.jpg")):
         project["preview"] = "preview.jpg"
