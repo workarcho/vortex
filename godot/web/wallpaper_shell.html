@@ -181,8 +181,25 @@ GODOT_CONFIG['args'] = ['--main-pack', MAIN_PACK, '--audio-driver', 'Dummy'].con
 		return engine.start();
 	}).then(function () {
 		status.remove();
+		showSizeInfo();
 	}, fail);
 }());
+
+// Diagnostics for the first 20 s: page size, device pixel ratio and the canvas backing size (low-resolution check).
+function showSizeInfo() {
+	const box = document.createElement('div');
+	box.style.cssText = 'position:fixed;left:50%;bottom:8px;transform:translateX(-50%);color:#fff;'
+		+ 'background:rgba(0,0,0,.7);font:14px monospace;padding:4px 8px;z-index:9;pointer-events:none';
+	document.body.appendChild(box);
+	const c = document.getElementById('canvas');
+	const tick = function () {
+		box.textContent = 'window ' + innerWidth + 'x' + innerHeight + '  dpr ' + devicePixelRatio
+			+ '  canvas ' + c.width + 'x' + c.height + '  screen ' + screen.width + 'x' + screen.height;
+	};
+	tick();
+	const id = setInterval(tick, 1000);
+	setTimeout(function () { clearInterval(id); box.remove(); }, 20000);
+}
 		</script>
 	</body>
 </html>
