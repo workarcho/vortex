@@ -183,3 +183,34 @@ func _run() -> void:
 	TitleState.apply_to_ship(run_ship, cfg)
 	check("the run starts with the hangar ship's oxygen (WorldManager::StartGame gets that ShipManager)",
 		run_ship.env.room_o2(want[0]) <= 5.0, true)
+
+	print("Systems added later (ShipManager::AddSystem: store purchase / event reward; start=\"false\" entries)")
+	var st := ShipState.new("PLAYER_SHIP_STEALTH", true)
+	check("Stealth A starts without shields", st.sys("shields") == null, true)
+	check("buying shields installs them", RunStore.install_system(st, "shields"), true)
+	var sv := ShipView.new()
+	sv.ship = st
+	check("Stealth A bought shields: blueprint img room_shields_2 (start=\"false\" entry)",
+		ShipView.interior_image("shields", st.system_by_id("shields")), "room_shields_2")
+	check("Stealth A bought shields: console glow on the manning slot",
+		sv.console_art(st.sys("shields")).kind, "interior")
+	check("Stealth A bought shields: listed with the ship's systems", st.system_list().has("shields"), true)
+	var ld := ShipSave.restore(ShipSave.snapshot(st))
+	sv.ship = ld
+	check("after save / load: the bought shields keep their console", sv.console_art(ld.sys("shields")).kind,
+		"interior")
+	check("after save / load: listed with the ship's systems", ld.system_list().has("shields"), true)
+	check("after save / load: the blueprint entry is the installed one",
+		ShipView.interior_image("shields", ld.system_by_id("shields")), "room_shields_2")
+	# A start="false" entry without img (Stealth A teleporter / battery, Kestrel A drones ...) gets the default.
+	RunStore.install_system(st, "battery")
+	check("Stealth A bought battery (no img) -> room_battery",
+		ShipView.interior_image("battery", st.system_by_id("battery")), "room_battery")
+	var ke := ShipState.new("PLAYER_SHIP_HARD", true)
+	RunStore.install_system(ke, "drones")
+	check("Kestrel A bought drones (no img): default room_drones image",
+		ShipView.interior_image("drones", ke.system_by_id("drones")), "room_drones")
+	sv.free()
+	var again := ShipState.new("PLAYER_SHIP_STEALTH", true)
+	check("installing on one ship leaves the blueprint of a new ship alone", again.sys("shields") == null
+		and again.system_by_id("shields").is_empty(), true)

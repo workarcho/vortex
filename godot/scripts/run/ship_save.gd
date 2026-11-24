@@ -89,6 +89,12 @@ static func apply(ship: ShipState, d: Dictionary) -> void:
 		SaveCodec.set_props(s, p)
 		systems[id] = s
 	ship.systems = systems
+	# The blueprint entries of systems added during the run (store / event AddSystem on a start="false" entry,
+	# RunStore.install_system) are marked installed again: the fresh blueprint has start = false there, and the
+	# interior image / console (ShipView), system order and system_by_id only look at installed entries.
+	for b in ship.blueprint.get("systems", []):
+		if systems.has(b.id):
+			b.start = true
 	# Weapons / artillery.
 	var weapons: Array[WeaponState] = []
 	for wd in d.get("weapons", []):

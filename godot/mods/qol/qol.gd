@@ -14,8 +14,13 @@ extends RefCounted
 ##   Default / Selling price (filter `infobox_content`). Texts: text_qol.xml (ours).
 ## - Extended statistics: the MORE STATS page of the Stats screen (filter `stats_more_button`;
 ##   rules/save_and_profile.md §3).
+## - Game speed: − [1x] + buttons under the scrap counter (and + / − keys) for 0.5x .. 3x. Engine.time_scale with
+##   the physics tick rate raised by the same factor, so every fixed simulation step keeps its vanilla length (no
+##   GameClock.MAX_FACTOR clipping) and timers, AI, projectiles and animations all speed up together. Applied only
+##   while the world runs (combat not paused, no map / store / event box open); 1x when the group is turned off.
 
 const AutoButton := preload("auto_drone_button.gd")
+const SpeedControl := preload("speed_control.gd")
 
 const G_COOLDOWN := "qol_cooldown"
 const G_HEALTH := "qol_health"
@@ -24,6 +29,7 @@ const G_DRONES := "qol_drones"
 const G_SCANNERS := "qol_scanners"
 const G_INFO := "qol_info"
 const G_STATS := "qol_stats"
+const G_SPEED := "qol_speed"
 
 const COOLDOWN_ON := "qol.cooldown.numbers"
 const COOLDOWN_FORMAT := "qol.cooldown.format"
@@ -37,6 +43,10 @@ const SCANNERS_ON := "qol.scanners.augment"
 const INFO_WEAPON_TIP := "qol.info.weapon_tooltip"
 const INFO_PANEL := "qol.info.panel_stats"
 const STATS_PAGE := "qol.stats.more_page"
+const SPEED_BUTTONS := "qol.speed.buttons"
+const SPEED_KEYS := "qol.speed.hotkeys"
+const SPEED_STEPS := [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0]
+const SPEED_NORMAL := 2  # index of 1x
 
 const SCANNERS_AUG := "ADV_SCANNERS"  # blueprints.xml <augBlueprint name="ADV_SCANNERS"> (Long-Ranged Scanners)
 const SCANNER_FILES := ["data/blueprints.xml", "data/dlcBlueprints.xml"]
@@ -67,6 +77,7 @@ func _mod_init(c: ModContext) -> void:
 	c.set_rule(&"tooltip.weapon", _weapon_tooltip)
 	c.add_filter(&"infobox_content", _infobox_content)
 	c.add_filter(&"stats_more_button", _stats_more_button)
+	c.add_filter(&"input_event", _speed_input)
 	_load_texts()
 	_map_hyperspace()
 
@@ -95,6 +106,9 @@ func _declare() -> void:
 	ctx.declare_group(G_STATS, "Extended statistics",
 		"A MORE STATS page on the Stats screen: win rates per ship and difficulty, streaks, damage, kills, ...")
 	ctx.declare(G_STATS, {"id": STATS_PAGE, "label": "MORE STATS button on the Stats screen", "default": true})
+	ctx.declare_group(G_SPEED, "Game speed", "Speed the game up or slow it down (0.5x to 3x).")
+	ctx.declare(G_SPEED, {"id": SPEED_BUTTONS, "label": "- / + buttons under the scrap counter", "default": true})
+	ctx.declare(G_SPEED, {"id": SPEED_KEYS, "label": "Keys: + / - (also on the numpad)", "default": true})
 
 
 ## Extended statistics: the Stats screen shows its MORE STATS button (the statistics themselves are always
@@ -204,6 +218,9 @@ func button_enabled() -> bool:
 
 
 func _on_hud_ready(region: String, node: Control, ship: ShipState) -> void:
+	if region == "hud":
+		_add_speed_control(node)
+		return
 	if region != "drone_panel" or node.get_node_or_null("QolDroneAuto") != null:
 		return
 	var b: Control = AutoButton.new()
@@ -294,6 +311,106 @@ static func add_scanners(text: String) -> String:
 func _on_settings_changed(id: String, _value: Variant) -> void:
 	if id == SCANNERS_ON or id == "group:" + G_SCANNERS:
 		FtlData.clear_data_cache()  # ships created from now on read the re-patched blueprints
+	if id == "group:" + G_SPEED and not settings.group_enabled(G_SPEED):
+		speed_index = SPEED_NORMAL  # turned off: back to 1x at once
+		restore_speed()
+
+
+# ---------------------------------------------------------------- game speed
+
+var speed_index := SPEED_NORMAL  # this session's choice (kept across jumps; not saved)
+var _speed_applied := false  # Engine.time_scale / physics ticks are ours (restore_speed puts them back)
+var _base_ticks := 60
+var _base_steps := 8
+var _speed_controls: Array[Control] = []
+
+
+func speed_buttons_enabled() -> bool:
+	return settings.on(SPEED_BUTTONS)
+
+
+## The chosen multiplier (1x while the group is off).
+func speed() -> float:
+	return float(SPEED_STEPS[speed_index]) if settings.group_enabled(G_SPEED) else 1.0
+
+
+## One step faster (+1) or slower (-1); false at the ends or with the group off.
+func speed_step(d: int) -> bool:
+	if not settings.group_enabled(G_SPEED):
+		return false
+	var i := clampi(speed_index + d, 0, SPEED_STEPS.size() - 1)
+	if i == speed_index:
+		return false
+	speed_index = i
+	return true
+
+
+## "0.5x", "1x", "1.25x" ...
+static func speed_label(m: float) -> String:
+	var t := "%.2f" % m
+	t = t.rstrip("0").rstrip(".")
+	return t + "x"
+
+
+## Every frame (SpeedControl._process): the chosen speed while the world runs, 1x otherwise (paused, a map /
+## store / event box open), so menus and the pause screen keep their normal pace.
+func apply_speed(running: bool) -> void:
+	var m := speed() if running else 1.0
+	if is_equal_approx(m, 1.0):
+		restore_speed()
+		return
+	if not _speed_applied:
+		_base_ticks = Engine.physics_ticks_per_second
+		_base_steps = Engine.max_physics_steps_per_frame
+		_speed_applied = true
+	# Physics steps keep the 1x delta above 1x (more steps per second); below 1x each step is shorter.
+	var k := maxf(m, 1.0)
+	Engine.physics_ticks_per_second = roundi(_base_ticks * k)
+	Engine.max_physics_steps_per_frame = ceili(_base_steps * k)
+	Engine.time_scale = m
+
+
+func restore_speed() -> void:
+	if not _speed_applied:
+		return
+	_speed_applied = false
+	Engine.time_scale = 1.0
+	Engine.physics_ticks_per_second = _base_ticks
+	Engine.max_physics_steps_per_frame = _base_steps
+
+
+## hud_ready "hud" (main.gd hud_root): the control goes on the ShipStatusHud (scrap counter, touch scale).
+func _add_speed_control(hud_root: Control) -> void:
+	var status: Control = null
+	for ch in hud_root.get_children():
+		if ch is ShipStatusHud:
+			status = ch
+	if status == null or status.get_node_or_null("QolGameSpeed") != null:
+		return
+	var main: Node = hud_root.get_parent().get_parent() if hud_root.get_parent() != null else null
+	var sc: Control = SpeedControl.new()
+	sc.setup(self, main, status)
+	sc.visible = speed_buttons_enabled()
+	status.add_child(sc)
+	sc.tree_exited.connect(func(): _speed_controls.erase(sc))
+	_speed_controls.append(sc)
+
+
+## input_event filter: clicks / taps on the speed buttons, and the + / - keys.
+func _speed_input(e: InputEvent, _main: Node) -> Variant:
+	if not settings.group_enabled(G_SPEED):
+		return null
+	for sc in _speed_controls:
+		if is_instance_valid(sc) and sc.handle(e):
+			return Hooks.CANCEL
+	if e is InputEventKey and e.pressed and not e.echo and settings.on(SPEED_KEYS) and not _speed_controls.is_empty():
+		var k := (e as InputEventKey).keycode
+		var d := 1 if k in [KEY_EQUAL, KEY_PLUS, KEY_KP_ADD] else (-1 if k in [KEY_MINUS, KEY_KP_SUBTRACT] else 0)
+		if d != 0:
+			if speed_step(d):
+				FtlData.play("powerUpSystem" if d > 0 else "powerDownSystem")
+			return Hooks.CANCEL
+	return null
 
 
 # ---------------------------------------------------------------- Better info (A6 / A7)

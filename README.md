@@ -40,8 +40,10 @@ The PC version can turn its autobattle demo (two AI ships fighting forever, mute
    `%APPDATA%\Godot\app_userdata\FTL Proto\wallpaper\Vortex Autobattle\`. Later clicks just open the folder (it is
    rebuilt after a game update).
 2. In Wallpaper Engine: **Create Wallpaper** → choose `index.html` in that folder.
-3. The wallpaper's settings have margin sliders to keep the battle clear of desktop icons and the taskbar; the
-   frame rate follows Wallpaper Engine's FPS limit.
+3. The wallpaper's settings have margin sliders to keep the battle clear of desktop icons and the taskbar, and an
+   **Interface** choice: *Full UI*, *Hull only* (each ship's hull bar and name) or *None* (just the ships). The
+   frame rate follows Wallpaper Engine's FPS limit. The desktop demo takes the same choice as
+   `--autobattle-ui=full|hull|none` (or `ftl/autobattle/ui` in `override.cfg`).
 
 The folder contains your FTL data: keep it to yourself (no Workshop upload). Developers: `python
 tools/build_web_wallpaper.py` makes the data-less template (`build/web-wallpaper-template/`, used by the button

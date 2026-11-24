@@ -6,6 +6,8 @@ extends Control
 ## weapons' charge bars and the crew's health. The right ship's is the same block mirrored onto the right edge: the
 ## frame art is flipped and the column hangs from the right edge, the texts stay readable (alignment swapped).
 ## Drawn in local units (WIDTH wide) and scaled by the scene (`scale`); mouse-transparent, nothing interactive.
+## `mode` (autobattle.gd ui_mode): "full" (all of the above), "hull" (the hull frame and bar + the class name under
+## it) or "none" (nothing drawn).
 
 const WIDTH := 400.0
 const NAME_POS := Vector2(146, 46)  # name block (right of the shields frame)
@@ -19,10 +21,14 @@ const BAR_STEP := 9.0
 const WEAPON_ROW := 16.0
 const CREW_ROW := 14.0
 const TAG_W := 44.0  # room for the ION / HACKED / BROKEN tag right of the bars
+const HULL_NAME_POS := Vector2(12, 44)  # "hull" mode: class name under the hull frame
+const HULL_ONLY_H := 66.0  # "hull" mode: local height of the block (frame + name)
+const MODES := ["full", "hull", "none"]
 
 var ship: ShipState
 var mirrored := false
 var subtitle := ""  # e.g. "Rebel fleet · sector 5"
+var mode := "full"  # "full" | "hull" | "none"
 var _t := 0.0
 
 
@@ -87,9 +93,12 @@ func _text(font_id: int, s: String, pos: Vector2, color := Color.WHITE, align :=
 # ------------------------------------------------------------------ drawing
 
 func _draw() -> void:
-	if ship == null:
+	if ship == null or mode == "none":
 		return
 	_draw_hull()
+	if mode == "hull":
+		_text(12, ship_class(), HULL_NAME_POS, Color.WHITE)
+		return
 	_draw_shields()
 	_draw_evade_oxygen()
 	_draw_name()
@@ -170,10 +179,7 @@ func _draw_evade_oxygen() -> void:
 
 ## Class name, the round's fleet / sector line, hull points and reactor use.
 func _draw_name() -> void:
-	var cls := TitleState.ship_class(String(ship.blueprint.get("name", "")))
-	if cls == "":
-		cls = FtlData.readable_name(String(ship.blueprint.get("name", "")))
-	_text(12, cls, NAME_POS, Color.WHITE)
+	_text(12, ship_class(), NAME_POS, Color.WHITE)
 	_text(10, subtitle, NAME_POS + Vector2(0, 22), FtlColors.GREY)
 	var line := "HULL %d/%d   REACTOR %d/%d" % [maxi(ship.hull, 0), ship.max_hull, ship.reactor_used(),
 		ship.reactor_capacity()]
@@ -260,8 +266,23 @@ func _crew_name(c: CrewMember, away: bool) -> String:
 	return nm
 
 
-## Local width of the system / weapons / crew column (the scene keeps the ships clear of it).
+func ship_class() -> String:
+	var cls := TitleState.ship_class(String(ship.blueprint.get("name", "")))
+	if cls == "":
+		cls = FtlData.readable_name(String(ship.blueprint.get("name", "")))
+	return cls
+
+
+## Local height of the top block the ships keep clear of in "hull" mode (0 otherwise: "full" keeps clear of the
+## whole column instead, "none" draws nothing).
+func top_height() -> float:
+	return HULL_ONLY_H if mode == "hull" else 0.0
+
+
+## Local width of the system / weapons / crew column (the scene keeps the ships clear of it; 0 unless "full").
 func column_width() -> float:
+	if mode != "full":
+		return 0.0
 	if ship == null:
 		return 160.0
 	var w := 0.0

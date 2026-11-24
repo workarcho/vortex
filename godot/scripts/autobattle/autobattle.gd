@@ -20,8 +20,14 @@ extends Node2D
 ## (ships without weapons never stall). A few seconds later the next round starts. Sandbox AI never escapes or
 ## surrenders (those are run events).
 ##
-## CLI: --autobattle [--mute] [--log] [--seed=N] [--round-time=S] [--player-chance=F] [--screenshot=PNG [--wait=S]]
-##      plus Godot's own --fullscreen / --resolution WxH. Esc quits; the mouse cursor hides after 3 s idle.
+## UI (`ui_mode`): "full" (both HUD columns + the round banner), "hull" (each ship's hull bar and class name only)
+## or "none" (just the ships). From the project setting ftl/autobattle/ui (override.cfg), the CLI flag
+## --autobattle-ui=full|hull|none, and on the web wallpaper the Wallpaper Engine "Interface" combo (window.vortexUi,
+## polled like the margins). Without the column the ships get the whole halves (below the hull bars in "hull").
+##
+## CLI: --autobattle [--mute] [--log] [--seed=N] [--round-time=S] [--player-chance=F] [--autobattle-ui=full|hull|none]
+##      [--screenshot=PNG [--wait=S]] plus Godot's own --fullscreen / --resolution WxH. Esc quits; the mouse cursor
+##      hides after 3 s idle.
 
 const ROUND_TIME := 210.0  # s of game time before a round is called off
 const DESTROYED_WAIT := 7.0  # s after the hull reaches 0 (enemy explosion 3 s, player-side 6 s)
@@ -42,6 +48,7 @@ static var stats := {}
 var round_time := ROUND_TIME
 var player_chance := AutobattleMatchup.PLAYER_CHANCE
 var seed_value := -1  # -1 = random
+var ui_mode := "full"  # "full" | "hull" | "none" (set_ui_mode)
 
 var rng := RandomNumberGenerator.new()
 var layer: CanvasLayer
@@ -74,6 +81,9 @@ func _ready() -> void:
 	# Wallpaper builds: override.cfg (PC) or the `wallpaper` feature tag override in project.godot (web).
 	if ProjectSettings.get_setting_with_override("ftl/autobattle/mute") == true:
 		FtlData.muted = true
+	var ui := parse_ui_mode(ProjectSettings.get_setting_with_override("ftl/autobattle/ui"))
+	if ui != "":
+		ui_mode = ui
 	for a in OS.get_cmdline_user_args():
 		if a == "--mute":
 			FtlData.muted = true
@@ -89,6 +99,12 @@ func _ready() -> void:
 			_shot = a.trim_prefix("--screenshot=")
 		elif a.begins_with("--wait="):
 			_wait = float(a.trim_prefix("--wait="))
+		elif a.begins_with("--autobattle-ui="):
+			var m := parse_ui_mode(a.trim_prefix("--autobattle-ui="))
+			if m != "":
+				ui_mode = m
+			else:
+				push_warning("--autobattle-ui: expected full, hull or none")
 	if seed_value >= 0:
 		rng.seed = seed_value
 	else:
@@ -116,6 +132,7 @@ func _ready() -> void:
 	overlay.draw.connect(_draw_overlay)
 	root_ctrl.add_child(overlay)
 	get_viewport().size_changed.connect(_layout)
+	set_ui_mode(ui_mode)
 	start_round()
 	if _shot != "":
 		_screenshot.call_deferred()
@@ -130,6 +147,36 @@ func _exit_tree() -> void:
 		get_tree().root.content_scale_aspect = _saved_aspect
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_clear_round(false)
+
+
+## "full" / "hull" / "none" (case-insensitive; also "hull only", "hp", "nothing", "off"), "" when not one of them.
+static func parse_ui_mode(v: Variant) -> String:
+	if v == null:
+		return ""
+	var t := String(str(v)).strip_edges().to_lower()
+	match t:
+		"full", "ui", "full ui", "all":
+			return "full"
+		"hull", "hull only", "hp", "hp only":
+			return "hull"
+		"none", "nothing", "off":
+			return "none"
+	return ""
+
+
+## Shows the full HUDs, only the hull bars or nothing, and lays the ships out again.
+func set_ui_mode(m: String) -> void:
+	var p := parse_ui_mode(m)
+	if p == "":
+		return
+	ui_mode = p
+	for h: AutobattleHud in [left_hud, right_hud]:
+		if h != null:
+			h.mode = p
+			h.queue_redraw()
+	if overlay != null:
+		overlay.visible = p == "full"  # the round banner belongs to the full UI
+	_layout()
 
 
 # ------------------------------------------------------------------ rounds
@@ -369,9 +416,13 @@ func _layout() -> void:
 	right_hud.position = (off + Vector2(vis.x - EDGE - AutobattleHud.WIDTH * k, EDGE)).round()
 	# Ships: each in its half, clear of its HUD column, both at the zoom the tighter one allows.
 	var half := roundf(vis.x / 2.0)
-	var col := EDGE + (maxf(left_hud.column_width(), right_hud.column_width()) + 8.0) * k
+	var cw := maxf(left_hud.column_width(), right_hud.column_width())
+	var col := EDGE + (cw + 8.0) * k if cw > 0.0 else EDGE  # "hull" / "none": no column
+	var top := maxf(left_hud.top_height(), right_hud.top_height()) * k  # "hull": under the hull bars
+	if top > 0.0:
+		top += EDGE
 	var area_w := maxf(half - col - MID_GAP, 100.0)
-	var area_h := maxf(vis.y - 2.0 * V_MARGIN, 100.0)
+	var area_h := maxf(vis.y - 2.0 * V_MARGIN - top, 100.0)
 	var z := ZOOM_MAX
 	var info := []
 	for sp: Space in [left, right]:
@@ -392,7 +443,7 @@ func _layout() -> void:
 		sp.position = Vector2(0 if on_left else split, 0)
 		sp.size = Vector2(split if on_left else full.x - split, full.y)
 		var cx := off.x + col + area_w / 2.0 if on_left else MID_GAP + area_w / 2.0
-		var centre := Vector2(roundf(cx), roundf(off.y + vis.y / 2.0))
+		var centre := Vector2(roundf(cx), roundf(off.y + top + (vis.y - top) / 2.0))
 		sp.fixed_rotation = rot
 		sp.set_fixed_origin((centre - b.get_center().rotated(-rot) * z).round(), z)
 
@@ -403,7 +454,8 @@ var _web_margins := {}
 var _web_poll := 0.0
 
 
-## Web wallpaper: Wallpaper Engine's margin sliders arrive in window.vortexMargins (web/wallpaper_shell.html).
+## Web wallpaper: Wallpaper Engine's margin sliders arrive in window.vortexMargins, the Interface combo in
+## window.vortexUi (web/wallpaper_shell.html).
 func _poll_web_margins(delta: float) -> void:
 	if not OS.has_feature("web"):
 		return
@@ -416,6 +468,11 @@ func _poll_web_margins(delta: float) -> void:
 	if d is Dictionary and d != _web_margins:
 		_web_margins = d
 		_layout()
+	# The "Interface" combo (Full UI / Hull only / None): window.vortexUi.
+	var ui: Variant = JavaScriptBridge.eval("window.vortexUi || ''", true)
+	var m := parse_ui_mode(ui)
+	if m != "" and m != ui_mode:
+		set_ui_mode(m)
 	# Wallpaper Engine's FPS limit (applyGeneralProperties fps; 30 until it arrives): a lighter wallpaper. The
 	# simulation runs on fixed physics steps, so a lower frame rate only means fewer drawn frames.
 	var fps: Variant = JavaScriptBridge.eval("window.vortexFps || 0", true)

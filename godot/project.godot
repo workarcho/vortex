@@ -47,6 +47,7 @@ autobattle/margin_right=0
 autobattle/margin_right.wallpaper=120
 autobattle/margin_top=0
 autobattle/margin_bottom=0
+autobattle/ui="full"
 
 [rendering]
 

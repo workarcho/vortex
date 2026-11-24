@@ -79,8 +79,9 @@ def project_json():
         "title": TITLE,
         "type": "web",
         "visibility": "private",
-        # User properties (sliders in Wallpaper Engine's panel), read by the shell's wallpaperPropertyListener and
-        # passed to the game as window.vortexMargins (autobattle.gd safe_margins).
+        # User properties (sliders / combo in Wallpaper Engine's panel), read by the shell's
+        # wallpaperPropertyListener and passed to the game as window.vortexMargins (autobattle.gd safe_margins) and
+        # window.vortexUi (autobattle.gd set_ui_mode: full / hull / none).
         "general": {"properties": {
             "marginleft": {"order": 0, "text": "Left margin (px)", "type": "slider", "min": 0, "max": 1000,
                            "value": 250, "fraction": False},
@@ -90,6 +91,11 @@ def project_json():
                           "value": 0, "fraction": False},
             "marginbottom": {"order": 3, "text": "Bottom margin (px)", "type": "slider", "min": 0, "max": 600,
                              "value": 0, "fraction": False},
+            "uimode": {"order": 4, "text": "Interface", "type": "combo", "value": "full", "options": [
+                {"label": "Full UI", "value": "full"},
+                {"label": "Hull only", "value": "hull"},
+                {"label": "None", "value": "none"},
+            ]},
         }},
     }
 

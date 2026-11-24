@@ -95,6 +95,9 @@ func _run() -> void:
 	get_tree().root.size = Vector2i(1720, 720)  # 21:9 (3440 × 1440)
 	await _frames()
 	_check_layout(ab, "21:9")
+	get_tree().root.size = Vector2i(1280, 720)
+	await _frames()
+	await _ui_modes(ab)
 
 	# ×7 speed: GameClock caps one step at 0.5 factor units (1/32 s), so the steps are made shorter and more
 	# frequent (240 Hz × time scale 7 = 7/240 s each) instead of just scaling a 60 Hz step.
@@ -138,3 +141,35 @@ func _run() -> void:
 	var after := _user_files()
 	print("  user:// files: %d before, %d after" % [before.size(), after.size()])
 	check("nothing written to user://", after == before, true)
+
+
+## Interface option (Wallpaper Engine combo / --autobattle-ui / ftl/autobattle/ui): full, hull only, none.
+func _ui_modes(ab: Node) -> void:
+	print("interface: full / hull only / none")
+	check("project setting default", ProjectSettings.get_setting("ftl/autobattle/ui"), "full")
+	check("parse", [ab.parse_ui_mode("FULL"), ab.parse_ui_mode("Hull only"), ab.parse_ui_mode("none"),
+		ab.parse_ui_mode("bogus"), ab.parse_ui_mode(null)], ["full", "hull", "none", "", ""])
+	check("starts with the full UI", [ab.ui_mode, ab.left_hud.mode, ab.overlay.visible], ["full", "full", true])
+	var z_full: float = ab.zoom
+	check("full: the HUD column is kept clear", ab.left_hud.column_width() > 0.0, true)
+	ab.set_ui_mode("hull")
+	await _frames()
+	check("hull only: both HUDs", [ab.left_hud.mode, ab.right_hud.mode], ["hull", "hull"])
+	check("hull only: no round banner", ab.overlay.visible, false)
+	check("hull only: no column, a top band", [ab.left_hud.column_width(), ab.left_hud.top_height() > 0.0],
+		[0.0, true])
+	check("hull only: ships at least as large", ab.zoom >= z_full, true)
+	_check_layout(ab, "hull only")
+	ab.set_ui_mode("none")
+	await _frames()
+	check("none: nothing drawn, no band", [ab.left_hud.mode, ab.left_hud.top_height(), ab.overlay.visible],
+		["none", 0.0, false])
+	_check_layout(ab, "none")
+	ab.set_ui_mode("nonsense")
+	check("unknown value ignored", ab.ui_mode, "none")
+	ab.set_ui_mode("full")
+	await _frames()
+	check("back to full", [ab.left_hud.mode, ab.overlay.visible, ab.zoom], ["full", true, z_full])
+	var shell := FileAccess.get_file_as_string("res://web/wallpaper_shell.html")
+	check("web shell passes the uimode combo as window.vortexUi",
+		shell.contains("p.uimode") and shell.contains("window.vortexUi"), true)

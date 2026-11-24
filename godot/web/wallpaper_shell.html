@@ -185,8 +185,10 @@ GODOT_CONFIG['args'] = ['--main-pack', MAIN_PACK, '--audio-driver', 'Dummy'].con
 	}, fail);
 }());
 
-// Wallpaper Engine user properties (project.json sliders) -> window.vortexMargins, polled by the game.
+// Wallpaper Engine user properties (project.json sliders / combo) -> window.vortexMargins and window.vortexUi
+// ("full" | "hull" | "none"), polled by the game (autobattle.gd).
 window.vortexMargins = null;
+window.vortexUi = '';
 window.vortexFps = 30;  // until Wallpaper Engine sends its FPS limit (Settings -> Performance)
 window.wallpaperPropertyListener = {
 	applyGeneralProperties: function (p) {
@@ -198,6 +200,7 @@ window.wallpaperPropertyListener = {
 			if (p['margin' + k]) m[k] = Number(p['margin' + k].value);
 		}
 		window.vortexMargins = m;
+		if (p.uimode) window.vortexUi = String(p.uimode.value);
 	},
 };
 
