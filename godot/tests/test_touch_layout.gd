@@ -236,7 +236,7 @@ func _systems() -> void:
 	var col: SystemPowerColumn = sb.columns["shields"]
 	while me.sys("shields").power > 0:
 		me.decrease_power("shields")
-	var c := at(col, col.hit_rect().get_center())
+	var c := at(col, col.click_rect().get_center())
 	tap(c)
 	check("tap shields column (drawn): powered", me.sys("shields").power > 0, true)
 	check("shields column tooltip", (await tip_at(c))[0], "system")
@@ -320,7 +320,7 @@ func _power_mode() -> void:
 	var wc: WeaponControl = main.weapon_control
 	var dp: DronePanel = main.drone_panel
 	var col: SystemPowerColumn = main.systems_bar.columns["engines"]
-	var sc := at(col, col.hit_rect().get_center())
+	var sc := at(col, col.click_rect().get_center())
 	# − mode.
 	tap(at(tp, TouchPowerToggle.SLOT_MINUS.get_center()))
 	check("tap −: − mode", tp.minus, true)

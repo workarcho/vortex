@@ -117,7 +117,8 @@ func _gui_input(event: InputEvent) -> void:
 			_touch_pressed = true
 		elif _touch_pressed:
 			_touch_pressed = false
-			if hit_rect().has_point(event.position):
+			# The power tap needs the system symbol, as on PC (the bars only show the tooltip while held).
+			if click_rect().has_point(event.position):
 				if TouchPowerToggle.removing():  # touch − mode: a tap removes a bar
 					decrease_requested.emit(system_id)
 				else:

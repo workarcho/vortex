@@ -251,7 +251,7 @@ func _multi_select(crew: Array) -> void:
 		me.increase_power("engines")
 	var pw := me.sys("engines").power
 	var col: SystemPowerColumn = main.systems_bar.columns["engines"]
-	var ec: Vector2 = col.get_global_transform() * col.hit_rect().get_center()
+	var ec: Vector2 = col.get_global_transform() * col.click_rect().get_center()
 	finger1(ec, true)
 	finger1(ec, false)
 	await get_tree().process_frame
@@ -331,7 +331,7 @@ func _held_finger(crew: Array) -> void:
 	var col: SystemPowerColumn = main.systems_bar.columns["engines"]
 	while me.sys("engines").power < 2:
 		me.increase_power("engines")
-	var ec: Vector2 = col.get_global_transform() * col.hit_rect().get_center()
+	var ec: Vector2 = col.get_global_transform() * col.click_rect().get_center()
 	var cp := scr(crew[0])
 	# Finger 0 rests on a crew sprite, finger 1 taps the engines column.
 	_touch(0, cp, true)

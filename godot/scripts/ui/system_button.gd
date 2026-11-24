@@ -108,25 +108,19 @@ func tooltip_for(half: int) -> String:
 	return ""
 
 
-## The hovered button (0, or the teleporter / door half), -1 = none. PC: the vanilla Button hit boxes (hit_rects,
-## strict test as GenericButton::MouseMove); touch (a live TouchPowerToggle): the whole control (the doors keep
-## their two boxes), the teleporter split in halves.
+## The hovered button (0, or the teleporter / door half), -1 = none: the vanilla Button hit boxes (hit_rects,
+## strict test as GenericButton::MouseMove), on PC and touch alike (a larger touch area kept turning systems on
+## when the player meant to change their power).
 func _half_at(p: Vector2) -> int:
-	if kind == "doors" or not TouchPowerToggle.live():
-		var rs := hit_rects(ship, kind)
-		for i in rs.size():
-			var r: Rect2 = rs[i]
-			if kind == "doors" and r.has_point(p) or SystemPowerColumn.strictly_inside(r, p):
-				return i
-		return -1
-	if kind != "teleporter":
-		return 0
-	return 0 if p.y < size.y / 2 else 1
+	var rs := hit_rects(ship, kind)
+	for i in rs.size():
+		var r: Rect2 = rs[i]
+		if kind == "doors" and r.has_point(p) or SystemPowerColumn.strictly_inside(r, p):
+			return i
+	return -1
 
 
 func _has_point(p: Vector2) -> bool:
-	if TouchPowerToggle.live():
-		return Rect2(Vector2.ZERO, size).has_point(p)
 	return _half_at(p) >= 0
 
 
