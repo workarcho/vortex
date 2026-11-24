@@ -48,6 +48,13 @@ var hover := ""
 var buttons := {}
 var ach_hover := Vector2i(-1, -1)  # (ship id, achievement index) of the hovered mini icon (iSelectedAch)
 var arrow_hover := -1  # display index of the hovered unlock arrow (-1 = none)
+## ShipSelect::infoBox: the hovered ship's description (ship_info) or {} (InfoBox::Clear).
+var info := {}
+
+const INFO_LOC := Vector2(453, 460)  # ShipSelect::Open: infoBox.location = (0x1c5, position.y + 0x15e)
+const INFO_W := 360  # SelectShip: InfoBox::SetDescription width 0x168
+## SelectShip, locked type A: the ship whose victory is the alternative unlock (any other id: the Lanius, 9).
+const ALT_PREV := {4: 3, 7: 4, 2: 7, 5: 2, 6: 5, 1: 6, 9: 1}
 
 
 func setup(t: TitleState) -> void:
@@ -64,6 +71,7 @@ func open(_ship_id: int, ship_type: int) -> void:
 	hover = ""
 	ach_hover = Vector2i(-1, -1)
 	arrow_hover = -1
+	info = {}  # ShipSelect::Open: InfoBox::Clear
 	_build()
 	queue_redraw()
 
@@ -233,7 +241,61 @@ func hover_tooltips(m: Vector2) -> String:
 		arrow_hover = ah
 		ach_hover = sel
 		queue_redraw()
+	_hover_info(m)
 	return TooltipService.text
+
+
+## ShipSelect::MouseMove: InfoBox::Clear, then the shown page's ShipButton strictly under the pointer runs
+## SelectShip (its description in the InfoBox); a type C of the Crystal / Lanius clears it instead.
+func _hover_info(m: Vector2) -> void:
+	var nf := {}
+	for nm in buttons:
+		if not String(nm).begins_with("ship"):
+			continue
+		var r: Rect2 = buttons[nm].rect
+		if m.x > r.position.x and m.x < r.end.x and m.y > r.position.y and m.y < r.end.y:
+			var id: int = buttons[nm].id
+			nf = {} if no_exist(id, shown_type) else ship_info(id, shown_type,
+				func(i: int, t: int) -> bool: return title != null and title.unlocked(i, t))
+	if nf.hash() != info.hash():
+		info = nf
+		queue_redraw()
+
+
+## ShipSelect::SelectShip [exe 0050eb00]: the InfoBox Description of ship `id`, layout `type` (blueprint
+## SHIP_BLUEPRINTS[id] + "_2" / "_3"): title = the blueprint's <class> + `shipselect_type_suffix` (" \1", \1 =
+## `type_a` / `type_b` / `type_c`). Unlocked: the blueprint <desc>, box height 135. Locked: the blueprint's <unlock>
+## text; on layout A followed by " \n\n" + `alt_unlock` (\1 = `alt_unlock_crystal` for the Crystal, else
+## `alt_unlock_victory` / `_locked` when that ship's A is locked, \1 = the class of ALT_PREV's ship), height 176;
+## the Crystal locked is titled `unidentified` (no suffix). `unlocked` = Callable(id, type) -> bool
+## (ScoreKeeper::GetShipUnlocked). Returns {kind "text", name, title, description, desc, h (SetDescription height)}
+## through `infobox_content` (context "ship_list").
+static func ship_info(id: int, type: int, unlocked: Callable) -> Dictionary:
+	var bp := TitleState.blueprint_of(id, type)
+	var text := FtlData.ship_blueprint_text(bp)
+	var title_text := TitleState.ship_class(bp) + TooltipText.f("shipselect_type_suffix", TooltipText.t(
+		"type_" + "abc"[type]))
+	var desc := FtlData._text_field(text, "desc")
+	var h := 135
+	if not bool(unlocked.call(id, type)):
+		desc = FtlData._text_field(text, "unlock")
+		if type == 0:
+			var alt := ""
+			if id == PlayerProfile.CRYSTAL:
+				alt = TooltipText.t("alt_unlock_crystal")
+			else:
+				var prev := int(ALT_PREV.get(id, PlayerProfile.LANIUS))
+				alt = TooltipText.f("alt_unlock_victory" if unlocked.call(prev, 0) else "alt_unlock_victory_locked",
+					TitleState.ship_class(TitleState.blueprint_of(prev, 0)))
+			desc += " \n\n" + TooltipText.f("alt_unlock", alt)
+			h = 176
+		if id == PlayerProfile.CRYSTAL:
+			title_text = TooltipText.t("unidentified")
+	var d := ItemInfoBox.finish({"kind": "text", "name": bp, "title": title_text, "description": desc, "stats": [],
+		"price": "", "warning": "", "tip": "", "tip_warning": ""}, {"context": "ship_list"})
+	if not d.is_empty():
+		d["h"] = h
+	return d
 
 
 func _gui_input(e: InputEvent) -> void:
@@ -308,6 +370,8 @@ func _draw() -> void:
 	for k in 3:
 		var b: Dictionary = buttons["type%d" % k]
 		MenuDraw.text_button(self, b, hover == "type%d" % k)
+	if not info.is_empty():  # ShipSelect::OnRender: InfoBox::OnRender (SetDescription: frame h = height − 14)
+		ItemInfoBox.draw(self, INFO_LOC, info, int(info.get("h", 135)) - 14, INFO_W)
 
 
 ## ShipButton::OnRender: lower achievement box + mini achievements (ship unlocked), the frame, then the mini ship

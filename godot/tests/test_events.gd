@@ -226,6 +226,8 @@ func _run() -> void:
 	_no_text_checks(r)
 	_boarder_checks(r)
 
+	_crew_choice_preview()
+
 	# --- the user's data
 	var real := EventDB.shared()
 	check("data: START_GAME, DESTROYED_DEFAULT, PIRATE ship", [real.events.has("START_GAME"),
@@ -473,3 +475,38 @@ func _reward_box_checks() -> void:
 	check("  alerts: intruders, fleet delayed, damage", (res.alerts as Array).map(func(a): return a[0]),
 		[FtlData.tr_id("intruder_alert"), FtlData.tr_id("fleet_delayed_1"), "3 damage to your hull"])
 	box.free()
+
+
+## ChoiceBox::SetChoices copies each choice event's ResourceEvent (its CrewBlueprint already made) and
+## RenderResources(choice = true) shows a gained crew member: the choice names who joins (icon, long name, skills).
+## TAVERN_HIRE (data): "Hire a crewmember." twice, each with its own mercenary.
+func _crew_choice_preview() -> void:
+	print("Choice preview: crew to hire (TAVERN_HIRE)")
+	var r := RunState.new_run(11)
+	for i in 10:
+		if r.phase == RunState.Phase.DIALOG:
+			r.choose(0)
+		elif r.phase == RunState.Phase.MESSAGE:
+			r.apply(RunIntent.make(RunIntent.CONTINUE))
+	r.enemy = {}
+	r.ship.scrap = 200
+	var tev := r.engine.base_event("TAVERN_HIRE", 5)
+	if tev.is_empty():  # a unique event the sector map already placed
+		r.engine.used_unique.erase("TAVERN_HIRE")
+		tev = r.engine.base_event("TAVERN_HIRE", 5)
+	r.show_event(tev)
+	check("tavern box open with 3 choices", [r.phase, r.dialog_choices.size()], [RunState.Phase.DIALOG, 3])
+	var p0: Dictionary = r.dialog_choices[0].preview_res
+	var p1: Dictionary = r.dialog_choices[1].preview_res
+	check("hire choices preview the scrap cost and one crew member", [int(p0.get("scrap", 0)) < 0,
+		(p0.get("crew", []) as Array).size(), (p1.get("crew", []) as Array).size()], [true, 1, 1])
+	var c0: Dictionary = p0.crew[0]
+	check("  the crew item has a name and a race", [String(c0.name) != "", String(c0.race) != "", c0.lost],
+		[true, true, false])
+	check("  drawn on the choice's resource box (second row)", ResourceBox.layout(p0, true).size.y > 32, true)
+	check("don't-hire choice: no box", r.dialog_choices[2].preview_res.is_empty(), true)
+	var n := r.ship.crew.size()
+	r.choose(0)
+	var joined: CrewMember = r.ship.crew[r.ship.crew.size() - 1] if r.ship.crew.size() > n else null
+	check("the previewed crew member is the one who joins", [joined != null, joined.display_name() if joined else "",
+		joined.race if joined else ""], [true, String(c0.name), String(c0.race)])

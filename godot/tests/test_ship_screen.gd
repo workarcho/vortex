@@ -45,6 +45,29 @@ func _run() -> void:
 	_test_sell()
 	_test_crew()
 	_test_box_labels()
+	_test_reactor_info()
+
+
+## Upgrades::OnLoop, reactor hovered [exe]: InfoBox::SetText(upgrade_reactor, reactor_desc); below 5 bars (reactor +
+## pending) the short text and the weak_warning line.
+func _test_reactor_info() -> void:
+	print("upgrades: reactor info box")
+	var r := make_run()
+	var ses := r.mgmt.upgrades
+	r.ship.reactor_max = 8
+	var d := UpgradesView.reactor_info(r.ship, ses)
+	check("reactor box: title / text / no warning", [d.title, d.description, d.warning], [FtlData.tr_id(
+		"upgrade_reactor"), FtlData.tr_id("reactor_desc"), ""])
+	check("reactor box: a text box (default 323 x 121 frame)", [d.kind, ItemInfoBox.frame_rect(Vector2.ZERO, d.kind).size],
+		["text", Vector2(323, 121)])
+	r.ship.reactor_max = 3
+	ses.reactor_temp = 1
+	d = UpgradesView.reactor_info(r.ship, ses)
+	check("reactor 3 + 1 pending: short text + weak warning", [d.description, d.warning], [FtlData.tr_id(
+		"reactor_desc_short"), FtlData.tr_id("weak_warning")])
+	ses.reactor_temp = 2
+	check("reactor 3 + 2 pending: the full text again", UpgradesView.reactor_info(r.ship, ses).warning, "")
+	ses.reactor_temp = 0
 
 
 func _test_upgrades() -> void:

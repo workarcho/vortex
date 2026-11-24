@@ -144,15 +144,46 @@ func _run() -> void:
 	check("no fuel: cannot jump", rw.can_target(rw.map.links_of(rw.current_beacon)[0]), false)
 	check("no fuel: wait allowed", rw.can_wait(), true)
 	var wx := rw.fleet.center.x
+	rw.map_open = true
+	var arr0 := rw.arrival_serial
 	check("wait", rw.apply(RunIntent.make(RunIntent.WAIT)), true)
+	# StarMap::MouseClick: the 2 s `waiting` animation first (map open, WAIT / close / beacons inactive, the fleet
+	# edge sliding by GetNextDangerMove x progress), then SetupNoFuel and the arrival at the same beacon.
+	check("waiting: map open, no turn yet", [rw.waiting(), rw.map_open, rw.fleet.center.x, rw.arrival_serial],
+		[true, true, wx, arr0])
+	check("waiting: WAIT / close refused", [rw.can_wait(), rw.apply(RunIntent.make(RunIntent.CLOSE_MAP))],
+		[false, false])
+	rw.step_wait(1.0)
+	var mv := rw.fleet.next_move(bool(rw.beacon().get("nebula", false)), rw._nebula_sector())
+	check("half way: the drawn fleet edge moved half the move", rw.fleet_draw_x(), wx + mv * 0.5)
+	rw.step_wait(1.0)
+	check("wait done: map closed", [rw.waiting(), rw.map_open], [false, false])
 	check("wait advances the fleet", rw.fleet.center.x > wx, true)
+	check("wait arrives without a jump (wait_arrival_serial)", [rw.arrival_serial != arr0,
+		rw.wait_arrival_serial == rw.arrival_serial], [true, true])
 	check("wait sets the NO_FUEL event", rw.log[-1].begins_with("event") and rw.log.any(func(l): return l.begins_with("wait (fuel 0): NO_FUEL")), true)
 	close_dialogs(rw)
 	if rw.ship.fuel == 0 and rw.can_wait():
 		rw.apply(RunIntent.make(RunIntent.TOGGLE_DISTRESS))
 		check("distress on", rw.distress, true)
 		rw.apply(RunIntent.make(RunIntent.WAIT))
+		rw.step_wait(LastStand.WAIT_TIME)
 		check("distress wait uses NO_FUEL_DISTRESS (or the fleet one)", rw.log.any(func(l): return l.begins_with("wait (fuel 0): NO_FUEL_DISTRESS") or l.begins_with("wait (fuel 0): NO_FUEL_FLEET")), true)
+	# StarMap::RenderDistressButtons: TextButtons laid out from the right edge 740 of the map frame.
+	var smv := StarMapView.new()
+	var L := smv.distress_layout()
+	var F := StarMapView.WIN.position
+	var dw := maxi(FtlData.ftl_text_width(63, FtlData.tr_id("button_distress_on")),
+		FtlData.ftl_text_width(63, FtlData.tr_id("button_distress_off"))) + 8
+	check("distress toggle: right edge 740, auto width, y 486, 36 tall", [L.distress.end.x - F.x, L.distress.size.x,
+		L.distress.position.y - F.y, L.distress.size.y], [740.0, float(dw), 486.0, 36.0])
+	var lw := FtlData.ftl_text_width(59, smv._distress_label())
+	check("WAIT ends 17 px left of the DISTRESS BEACON label (label 12 px left of the toggle)",
+		L.distress.position.x - 12 - lw - L.wait.end.x, 17.0)
+	check("inset: 7 slices from 19 px left of WAIT to 752", [L.slices.size(), L.slices[0][0].position.x,
+		L.slices[6][0].end.x - F.x], [7, L.wait.position.x - 19, 752.0])
+	check("label is 2 lines", smv._distress_label().split("\n").size(), 2)
+	smv.free()
 
 	# --- sector transition
 	var rs := RunState.new_run(44)

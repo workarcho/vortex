@@ -27,8 +27,11 @@ const COL_HOT := Color8(255, 230, 94)
 ## closeSectorButton); next sector 226×36 with side_nextsector.png at (−19, −8); wait 95×36; distress at (666, 486).
 const CLOSE_RECT := Rect2(WIN.position + Vector2(597, 541), Vector2(124, 30))
 const NEXT_RECT := Rect2(WIN.position + Vector2(514, 12), Vector2(226, 36))
+## Out of fuel (rules/starmap.md "Wait / distress inset"): waitButton TextButton "button_wait" 95×36 at (471, 486)
+## (corner 3, font 63, auto width, margin 4) and the DistressButton TextButton at (666, 486) 74×36 (labels
+## button_distress_off / _on, auto width right-aligned: right edge 740), moved by RenderDistressButtons (distress_layout).
 const WAIT_RECT := Rect2(WIN.position + Vector2(471, 486), Vector2(95, 36))
-const DISTRESS_RECT := Rect2(WIN.position + Vector2(666, 486), Vector2(56, 32))
+const DISTRESS_RECT := Rect2(WIN.position + Vector2(666, 486), Vector2(74, 36))
 const JUMP_SCALE := 1.2  # touch JUMP = the combat touch buttons' size (CommandHud touch scale) [ours]
 const TOUCH_GAP := 4.0  # px between the map frame, the JUMP base and the info panel [ours]
 const INFO_WRAP_MIN := 120  # info panel wrap floor on narrow canvases [ours]
@@ -44,6 +47,7 @@ var show_paths := true  # settings.ini `showpaths` (default on); `--set=showpath
 var _target_t := 0.0  # targetBoxTimer (1 s loop), restarted when potentialLoc changes
 var _target_of := -1
 var _distress_t := 0.0  # distressAnim (1 s loop)
+var _distress_on := false
 var _last_selected := -1
 var _cli_hover := ""  # --map-hover=BEACON|near|far (screenshots)
 ## Last Stand (LastStandMap): flagship marker orbit (shipRotation[1]), its jump slide, FLAGSHIP JUMPING warning.
@@ -94,8 +98,8 @@ func _process(d: float) -> void:
 	if _cli_hover != "":
 		_apply_cli_hover()
 	ship_angle = StarMap.marker_step(ship_angle, d, out_of_fuel())
-	if LastStand.waiting(run):
-		LastStand.step_wait(run, d)  # StarMap::OnLoop -> UpdateDangerZone while `waiting` runs (closes the map)
+	if run.waiting():
+		run.step_wait(d)  # StarMap::OnLoop -> UpdateDangerZone while `waiting` runs (closes the map)
 		if not run.map_open:
 			return
 	if LastStand.active(run):
@@ -105,6 +109,9 @@ func _process(d: float) -> void:
 		boss_warning.update(d)
 		if not boss_warning.running():
 			boss_warning.start()
+	if run.distress != _distress_on:
+		_distress_on = run.distress
+		_distress_t = 0.0  # StarMap::MouseClick: distressAnim.Start(0) when switched on (Stop when off)
 	_distress_t = fmod(_distress_t + d, 1.0)
 	if run.selected != _target_of:
 		_target_of = run.selected
@@ -226,17 +233,17 @@ func jump_state() -> String:
 
 
 func _hit(p: Vector2) -> String:
-	if LastStand.waiting(run):
+	if run.waiting():
 		return ""  # StarMap::MouseMove / OnTouch return early while `waiting` runs
 	if CLOSE_RECT.has_point(p):
 		return "close"
 	if profile.is_touch() and run.selected >= 0 and not out_of_fuel() and _jump_rect().has_point(p):
 		return "jump"
-	if out_of_fuel() and WAIT_RECT.has_point(p):
+	if out_of_fuel() and _inside(distress_layout().wait, p):
 		return "wait"
 	if _boss_wait_shown() and LastStandMap.wait_rect(WIN.position).has_point(p):
 		return "wait"  # boss level: the final_sector_wait inset
-	if out_of_fuel() and DISTRESS_RECT.has_point(p):
+	if out_of_fuel() and _inside(distress_layout().distress, p):
 		return "distress"
 	if _next_shown() and NEXT_RECT.has_point(p):
 		return "next"
@@ -428,7 +435,7 @@ func _next_shown() -> bool:
 func _next_fleet_center() -> Vector2:
 	var f := run.fleet
 	var m := f.next_move(bool(run.beacon().get("nebula", false)), _nebula_sector())
-	return Vector2(f.center.x + m, f.center.y)
+	return Vector2(run.fleet_draw_x() + m, f.center.y)
 
 
 ## StarMap::bNebulaMap: the current sector is a nebula sector.
@@ -474,7 +481,7 @@ func _draw_fleet(o: Vector2) -> void:
 	if run.fleet == null:
 		return
 	var r := run.fleet.radius()
-	var c := o + run.fleet.center
+	var c := o + Vector2(run.fleet_draw_x(), run.fleet.center.y)  # slides during the WAIT animation
 	var nc := o + _next_fleet_center()
 	var edge_img := FtlData.texture("img/map/map_warningcircle.png")
 	var point_img := FtlData.texture("img/map/map_warningcircle_point.png")
@@ -554,8 +561,8 @@ func _draw() -> void:
 	LastStandMap.draw_marker(self, run, o, boss_angle, boss_slide)  # after the player's marker
 	# 5. Rebel fleet over the beacons.
 	_draw_fleet(o)
-	# 6. Out of fuel / waiting (boss-level WAIT animation): dark overlay over the map.
-	var waiting := LastStand.waiting(run)
+	# 6. Out of fuel / waiting (WAIT animation): dark overlay over the map.
+	var waiting := run.waiting()
 	if nofuel or waiting:
 		draw_rect(WIN, Color(0, 0, 0, 0.4))
 	# 7. Frame outline (over the zone image), tabs, texts, buttons.
@@ -680,7 +687,7 @@ func _draw_buttons(nofuel: bool) -> void:
 	var cb := FtlData.texture("img/main_menus/button_cancel_base.png")
 	if cb:
 		draw_texture(cb, CLOSE_RECT.position + Vector2(-24, -8))
-	ShipScreen.text_button(self, CLOSE_RECT, FtlData.tr_id("button_cancel"), "off" if LastStand.waiting(run)
+	ShipScreen.text_button(self, CLOSE_RECT, FtlData.tr_id("button_cancel"), "off" if run.waiting()
 		else ("hot" if h == "close" else "on"))  # closeButton inactive while waiting
 	if _next_shown():
 		var t := FtlData.texture("img/map/side_nextsector.png")
@@ -688,21 +695,87 @@ func _draw_buttons(nofuel: bool) -> void:
 			draw_texture(t, NEXT_RECT.position + Vector2(-19, -8))
 		_button(NEXT_RECT, FtlData.tr_id("button_nextsector"), h == "next")
 	if nofuel:
-		var can := run.can_wait()
-		var wt := FtlData.texture("img/map/map_fuel_WAIT_%s.png" % ("off" if not can else ("select2" if h == "wait"
-			else "on")))
-		if wt:
-			draw_texture(wt, WAIT_RECT.position + (WAIT_RECT.size - wt.get_size()) / 2.0)
-		var dt := FtlData.texture("img/map/map_fuel_%s_%s.png" % ["ON" if run.distress else "OFF",
-			"select2" if h == "distress" else "on"])
-		if dt:
-			draw_texture(dt, DISTRESS_RECT.position)
-		if run.distress:
-			_img("map/map_fuel_redlight.png", DISTRESS_RECT.position + Vector2(78, 16))
+		_draw_distress_buttons(h)
 	elif _boss_wait_shown():
 		LastStandMap.draw_wait_inset(self, WIN.position, "hot" if h == "wait" else "on")
 	if profile.is_touch():
 		_draw_touch_info()
+
+
+## GenericButton::MouseMove: strict on every edge.
+static func _inside(r: Rect2, p: Vector2) -> bool:
+	return p.x > r.position.x and p.x < r.end.x and p.y > r.position.y and p.y < r.end.y
+
+
+## StarMap::RenderDistressButtons [exe 005d9240] geometry, laid out from the right (map coordinates + WIN.position):
+## the DistressButton keeps its right edge at 740 (auto width = the wider of its two labels in font 63 + 2 × 4); the
+## `map_distress_beacon` label (font 59) ends 12 px left of it; the waitButton (auto width "button_wait" + 2 × 4) ends
+## 17 px left of the label; the map/side_wait_distress.png inset (77×67) under them from 19 px left of WAIT to 752,
+## cut in 7 slices at y 467: [0, 27) left cap, column 27 stretched under WAIT, [28, 47) the joint before the label,
+## column 47 stretched under the label, [48, 60) the joint before the toggle, column 60 stretched under it, [61, 77)
+## the right cap at 736. Returns {wait, distress: Rect2, label: Vector2 (centre-top of the 2-line label), slices:
+## [[dest Rect2, src Rect2]]} in view coordinates.
+func distress_layout() -> Dictionary:
+	var F := WIN.position
+	var on := FtlData.tr_id("button_distress_on")
+	var off := FtlData.tr_id("button_distress_off")
+	var dw := maxi(FtlData.ftl_text_width(63, on), FtlData.ftl_text_width(63, off)) + 8
+	var label := _distress_label()
+	var lw := FtlData.ftl_text_width(59, label)
+	var lh := FtlData.ftl_line_height(59) * label.split("\n").size()
+	var ww := FtlData.ftl_text_width(63, FtlData.tr_id("button_wait")) + 8
+	var dx := 740.0 - dw
+	var gap_x := dx - 12.0  # right joint
+	var lx := gap_x - lw  # label left
+	var joint := lx - 19.0  # left joint
+	var wx := joint + 2.0 - ww
+	var left := wx - 19.0
+	var y := 467.0
+	var hh := 67.0
+	var t := FtlData.texture("img/map/side_wait_distress.png")
+	if t != null:
+		hh = t.get_height()
+	var slices := [
+		[Rect2(left, y, 27, hh), Rect2(0, 0, 27, hh)],
+		[Rect2(left + 27, y, joint - (left + 27), hh), Rect2(27, 0, 1, hh)],
+		[Rect2(joint, y, 19, hh), Rect2(28, 0, 19, hh)],
+		[Rect2(lx, y, gap_x - lx, hh), Rect2(47, 0, 1, hh)],
+		[Rect2(gap_x, y, 12, hh), Rect2(48, 0, 12, hh)],
+		[Rect2(dx, y, 736 - dx, hh), Rect2(60, 0, 1, hh)],
+		[Rect2(736, y, 16, hh), Rect2(61, 0, 16, hh)]]
+	for s in slices:
+		s[0] = Rect2((s[0] as Rect2).position + F, (s[0] as Rect2).size)  # Rect2 is a value: write it back
+	return {"wait": Rect2(F + Vector2(wx, 486), Vector2(ww, 36)), "distress": Rect2(F + Vector2(dx, 486),
+		Vector2(dw, 36)), "label": F + Vector2(lx - 3 + roundf(0.5 * lw), 503 - roundf(0.5 * lh)), "slices": slices}
+
+
+func _distress_label() -> String:
+	return FtlData.tr_id("map_distress_beacon").replace("\\n", "\n")
+
+
+## Out of fuel: the inset, WAIT (inactive while it cannot wait / the WAIT animation runs), the DISTRESS BEACON label
+## in COLOR_BUTTON_ON, the DistressButton (OFF / ON; DistressButton::OnRender adds 3×3 squares in the button colour
+## at its two left corners) and, while it is on, map/side_distressbeacon_redlight.png at (717, 499) during the first
+## half of each 1 s distressAnim loop (restarted by the toggle).
+func _draw_distress_buttons(h: String) -> void:
+	var L := distress_layout()
+	var t := FtlData.texture("img/map/side_wait_distress.png")
+	if t != null:
+		for s in L.slices:
+			if (s[0] as Rect2).size.x > 0:
+				draw_texture_rect_region(t, s[0], s[1])
+	ShipScreen.text_button(self, L.wait, FtlData.tr_id("button_wait"), "off" if not run.can_wait()
+		else ("hot" if h == "wait" else "on"), 63, 3, 2)
+	FtlData.draw_ftl_text(self, 59, _distress_label(), L.label, COL_ON, 1)
+	var dr: Rect2 = L.distress
+	var st := "hot" if h == "distress" else "on"
+	ShipScreen.text_button(self, dr, FtlData.tr_id("button_distress_on" if run.distress else "button_distress_off"),
+		st, 63, 3, 2)
+	var sq := ShipScreen.COL_HOT if st == "hot" else ShipScreen.COL_TEXT
+	draw_rect(Rect2(dr.position, Vector2(3, 3)), sq)
+	draw_rect(Rect2(dr.position + Vector2(0, dr.size.y - 3), Vector2(3, 3)), sq)
+	if run.distress and _distress_t < 0.5:
+		_img("map/side_distressbeacon_redlight.png", WIN.position + Vector2(717, 499))
 
 
 ## Touch: JUMP (TouchCombatButtons look: lit when a jumpable beacon is selected, dim otherwise) and the beacon

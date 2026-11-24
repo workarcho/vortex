@@ -114,6 +114,9 @@ static func clone(ship: ShipState, c: CrewMember) -> bool:
 	if not TeleporterRule.place_arrival(ship, c, room):
 		c.hp = 0.0
 		return false
+	# The clone is a fresh body (new CrewAnimation, status reset): its next death plays the death sound again
+	# (CrewAnimation::OnUpdate, dying and status != 3). Without this only a first death was ever heard.
+	c.death_sound_done = false
 	apply_skill_loss(c)
 	FtlData.play("cloneArrive")
 	return true

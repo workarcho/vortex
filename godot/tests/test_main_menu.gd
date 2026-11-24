@@ -445,6 +445,8 @@ func _test_ship_list() -> void:
 	l.click(l.buttons["ship3"].rect.get_center())
 	check("pick Engi B", picked, [3, 1])
 	l.open(0, 0)
+	_test_ship_list_info(l, t)
+	l.open(0, 0)
 	l.click(Vector2(20, 700))
 	check("click outside closes", l.visible, false)
 	check("mini ship texture", ShipListView.mini_texture(0, 0) != null, true)
@@ -475,6 +477,45 @@ func _test_ship_list() -> void:
 
 ## ShipButton geometry (OnInit: +20 px when ship-locked / non-existent, hit box +40 when unlocked) and the
 ## UnlockArrows of ShipSelect::Open (positions, status from layout A unlocks, images, tooltip text).
+## ShipSelect::MouseMove -> SelectShip [exe]: the hovered ship's InfoBox (location (453, 460), 360 wide).
+func _test_ship_list_info(l: ShipListView, t: TitleState) -> void:
+	print("Ship list: description InfoBox on hover (ShipSelect::SelectShip)")
+	var none := func(_i: int, _ty: int) -> bool: return false
+	var all := func(_i: int, _ty: int) -> bool: return true
+	var only_a := func(i: int, ty: int) -> bool: return ty == 0 and i != 8
+	var k := ShipListView.ship_info(0, 0, all)
+	var kclass := TitleState.ship_class("PLAYER_SHIP_HARD")
+	check("Kestrel A: class + type suffix, the blueprint text, 135 tall", [k.title, k.description, k.h],
+		[kclass + TooltipText.f("shipselect_type_suffix", TooltipText.t("type_a")),
+		FtlData._text_field(FtlData.ship_blueprint_text("PLAYER_SHIP_HARD"), "desc"), 135])
+	var e := ShipListView.ship_info(1, 0, none)
+	var alt := TooltipText.f("alt_unlock", TooltipText.f("alt_unlock_victory_locked",
+		TitleState.ship_class("PLAYER_SHIP_ROCK")))
+	check("locked Stealth A: unlock text + alt unlock (the Rock's victory, locked), 176 tall", [e.description, e.h],
+		[FtlData._text_field(FtlData.ship_blueprint_text("PLAYER_SHIP_STEALTH"), "unlock") + " \n\n" + alt, 176])
+	var e2 := ShipListView.ship_info(1, 0, func(i: int, ty: int) -> bool: return ty == 0 and i != 1)
+	check("  the alt line drops (locked) once the Rock A is unlocked", e2.description.ends_with(TooltipText.f(
+		"alt_unlock", TooltipText.f("alt_unlock_victory", TitleState.ship_class("PLAYER_SHIP_ROCK")))), true)
+	var kb := ShipListView.ship_info(0, 1, only_a)
+	check("locked Kestrel B: its unlock text only, 135 tall", [kb.description, kb.h], [FtlData._text_field(
+		FtlData.ship_blueprint_text("PLAYER_SHIP_HARD_2"), "unlock"), 135])
+	var cr := ShipListView.ship_info(8, 0, only_a)
+	check("locked Crystal: Unidentified Cruiser, alt crystal text", [cr.title, cr.description.ends_with(
+		TooltipText.f("alt_unlock", TooltipText.t("alt_unlock_crystal")))], [TooltipText.t("unidentified"), true])
+	t.unlock_all = true
+	l.open(0, 0)
+	l.hover_tooltips(l.buttons["ship0"].rect.get_center())
+	check("hovering the Kestrel fills the box", l.info.get("title", ""), kclass + TooltipText.f(
+		"shipselect_type_suffix", TooltipText.t("type_a")))
+	l.hover_tooltips(Vector2(20, 700))
+	check("pointer elsewhere: box cleared", l.info.is_empty(), true)
+	l.open(0, 2)
+	l.hover_tooltips(l.buttons["ship8"].rect.get_center())
+	check("type C of the Crystal: no box", l.info.is_empty(), true)
+	check("frame 360 wide at (460, 534)", ItemInfoBox.frame_rect(ShipListView.INFO_LOC, "text", 121, ShipListView.INFO_W),
+		Rect2(460, 534, 360, 121))
+
+
 func _test_ship_buttons_and_arrows() -> void:
 	print("ship list: ShipButton geometry, UnlockArrows")
 	check("unlocked ship: slot, 191x161 hit box", ShipListView.button_rect(1, false, false),

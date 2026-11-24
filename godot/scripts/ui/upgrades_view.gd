@@ -216,10 +216,9 @@ func _draw_info(id: String) -> void:
 	var at := P + Vector2(600, 0)
 	var ses := run.mgmt.upgrades
 	if id == "reactor":
-		var c := ses.reactor_cost_next(run.ship)
-		ShipScreen.info_box(self, at, FtlData.tr_id("upgrade_reactor"),
-			"Reactor power: %d bars." % ses.reactor_level(run.ship) + ("\n\nNext bar: %d scrap." % c if c >= 0 else ""),
-			"Not enough scrap." if c > run.ship.scrap else "")
+		var d := reactor_info(run.ship, ses)
+		if not d.is_empty():
+			ItemInfoBox.draw(self, at, d)
 		return
 	# Upgrades: InfoBox::SetSystem(system, tempUpgrade): the per-level table with the bought bars previewed.
 	var s := run.ship.sys(id)
@@ -227,3 +226,17 @@ func _draw_info(id: String) -> void:
 		return
 	var d := InfoPanels.system_content(id, s.level, "", {"context": "upgrades", "ship": run.ship})
 	InfoPanels.draw_system(self, at, d, UpgradeSession.max_level(run.ship, id), s.level, int(ses.temp.get(id, 0)))
+
+
+## Upgrades::OnLoop, reactor button hovered [exe 005315d0]: InfoBox::SetText(title `upgrade_reactor`, text
+## `reactor_desc`, default width (forceSystemInfoWidth is 0 on this screen), default height, EXPAND_UP): the same
+## description box as the store / hangar texts (title font 16, description font 10, 323 x 121 frame at the
+## InfoBox location). While the reactor (GetAvailablePower().second + the pending bars) is below 5 the text is
+## `reactor_desc_short` and InfoBox::SetWarning(`weak_warning`) adds the red line. Goes through `infobox_content`
+## (kind "text", name "reactor", context "upgrades").
+static func reactor_info(ship: ShipState, ses: UpgradeSession) -> Dictionary:
+	var weak := ses.reactor_level(ship) < 5
+	return ItemInfoBox.finish({"kind": "text", "name": "reactor", "title": FtlData.tr_id("upgrade_reactor"),
+		"description": FtlData.tr_id("reactor_desc_short" if weak else "reactor_desc"), "stats": [], "price": "",
+		"warning": FtlData.tr_id("weak_warning") if weak else "", "tip": "", "tip_warning": ""},
+		{"context": "upgrades"})

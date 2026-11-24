@@ -402,4 +402,58 @@ func _run() -> void:
 	key(KEY_Z)
 	check("ionized doors: Z does nothing", me.env.doors.filter(func(d): return d.open).size(), 0)
 	me.sys("doors").ion = 0
+	await _system_hit_areas()
 
+
+
+## SystemBox::MouseMove [exe]: clicks need `mouseHover` = the symbol square (loc + 21 < m < loc + 42), the bars only
+## answer the tooltip (hitBox x + 24, w 15); the cooldown boxes' buttons only take their Button hit boxes.
+func _system_hit_areas() -> void:
+	print("System box hit areas: the symbol takes the power clicks, the bars do not; buttons by their hit boxes")
+	var col: SystemPowerColumn = main.systems_bar.columns["engines"]
+	var es := me.sys("engines")
+	var at := func(local: Vector2) -> Vector2: return col.get_global_transform() * local
+	var top := SystemPowerColumn.ABOVE
+	var p0 := es.power
+	click(at.call(Vector2(32, top + SystemPowerColumn.bar_y(es, 0) + 3)), MOUSE_BUTTON_RIGHT)
+	check("right click on the lowest bar: no change", es.power, p0)
+	click(at.call(Vector2(32, top + 32)), MOUSE_BUTTON_RIGHT)
+	check("right click on the symbol: -1", es.power, p0 - 1)
+	click(at.call(Vector2(32, top + SystemPowerColumn.bar_y(es, 0) + 3)))
+	check("left click on a bar: no change", es.power, p0 - 1)
+	click(at.call(Vector2(32, top + 32)))
+	check("left click on the symbol: +1", es.power, p0)
+	click(at.call(Vector2(17, top + 32)))
+	check("left of the symbol square (old 32 px column): no change", es.power, p0)
+	check("click square strict", [SystemPowerColumn.strictly_inside(col.click_rect(), Vector2(21, top + 30)),
+		SystemPowerColumn.strictly_inside(col.click_rect(), Vector2(22, top + 30)),
+		SystemPowerColumn.strictly_inside(col.click_rect(), Vector2(41, top + 41)),
+		SystemPowerColumn.strictly_inside(col.click_rect(), Vector2(42, top + 41))], [false, true, true, false])
+	var tr := col.tooltip_rect()
+	check("tooltip column x 24, 15 wide, down to loc + 31", [tr.position.x, tr.size.x, tr.end.y], [24.0, 15.0,
+		top + 31.0])
+	await get_tree().process_frame
+	_move(at.call(Vector2(31, top + 5)))
+	check("pointer on the bars: symbol not hovered", col.hovered, false)
+	_move(at.call(Vector2(31, top + 30)))
+	check("pointer on the symbol: hovered", col.hovered, true)
+	_move(Vector2(-50, -50))
+
+	var st := ShipState.new("PLAYER_SHIP_STEALTH", true)
+	check("stealth ship has cloaking", st.sys("cloaking") != null, true)
+	var cl := st.sys("cloaking")
+	cl.power = 1
+	check("cloak button hit box, 1 bar", SystemButton.hit_rects(st, "cloaking"), [Rect2(10, 47, 20, 19)])
+	cl.level = maxi(cl.level, 3)
+	cl.power = 3
+	check("cloak button hit box, 3 bars", SystemButton.hit_rects(st, "cloaking"), [Rect2(10, 23, 20, 43)])
+	check("battery / mind / teleporter hit boxes", [SystemButton.hit_rects(st, "battery"),
+		SystemButton.hit_rects(st, "mind"), SystemButton.hit_rects(st, "teleporter")], [[Rect2(9, 22, 20, 43)],
+		[Rect2(10, 35, 20, 31)], [Rect2(10, 10, 20, 20), Rect2(10, 33, 20, 20)]])
+	var b := SystemButton.new()
+	b.setup(st, "cloaking", null, Vector2(100, 600))
+	check("cloak button: its image corner is not clickable (PC)", b._has_point(Vector2(2, 80)), false)
+	check("cloak button: the old overlap with the bars (x < 12) is not clickable", b._has_point(Vector2(4, 40)), false)
+	check("cloak button: inside its hit box", b._has_point(Vector2(20, 40)), true)
+	check("cloak button: no tooltip half outside the box", b._half_at(Vector2(35, 85)), -1)
+	b.free()

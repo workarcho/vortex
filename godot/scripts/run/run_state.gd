@@ -50,6 +50,13 @@ var enemy := {}  # event ship: {ship_ev, blueprint, plan, hostile, surrendered, 
 var enemy_serial := 0  # bumped when a new event ship appears (the scene is rebuilt)
 var arrival_serial := 0  # bumped on every arrival (the scene is rebuilt)
 var distress := false  # out of fuel: distress beacon toggle
+## Out of fuel WAIT animation outside the boss level (StarMap `waiting` tracker, seconds elapsed; -1 = none; the
+## boss level keeps its own in `boss.wait_t`), and the fleet x it started from (dangerWaitStart).
+var wait_t := -1.0
+var wait_fleet_x := 0.0
+## arrival_serial of the last "arrival" made by waiting (CommandGui::OnLoop GetWaitLocation: ShipManager::Wait, no
+## JumpLeave -> no jump animation / sounds); -1 = none.
+var wait_arrival_serial := -1
 var store_open := false
 var store_pending := false  # open the store when the arrival dialog closes
 var store_selected := -1  # touch: selected box code
@@ -235,7 +242,7 @@ func at_exit() -> bool:
 func can_wait() -> bool:
 	if LastStand.active(self):
 		return LastStand.can_wait(self)  # StarMap::OnLoop: in the boss level also with fuel, no ship present
-	return ship.fuel < 1 and not has_hostile() and phase == Phase.IDLE
+	return ship.fuel < 1 and not has_hostile() and phase == Phase.IDLE and wait_t < 0.0
 
 
 ## Last sector reached (the Last Stand: no NEXT SECTOR).
@@ -257,8 +264,8 @@ func apply(intent: Dictionary) -> bool:
 	var arg := int(intent.get("arg", -1))
 	if over != "":
 		return false
-	if LastStand.waiting(self) and String(intent.type) in LastStand.WAIT_BLOCKED:
-		return false  # boss-level WAIT animation running (StarMap waiting: map input ignored)
+	if waiting() and String(intent.type) in LastStand.WAIT_BLOCKED:
+		return false  # WAIT animation running (StarMap waiting: map input ignored)
 	match String(intent.type):
 		RunIntent.OPEN_MAP:
 			if not can_open_map() or leave_crew_open:
@@ -437,23 +444,71 @@ func _advance_fleet(leaving: Dictionary) -> void:
 	if LastStand.active(self):
 		LastStand.update_boss(self)  # boss level: no fleet move / sweep, the flagship's turn instead
 		return
-	var nebula_sector := false
-	var d: XmlNode = engine.db.sectors.get(sector_desc)
-	if tree != null and sector_id >= 0:
-		nebula_sector = tree.sectors[sector_id].cls == "NEBULA"
-	elif d:
-		nebula_sector = sector_desc.contains("NEBULA")
-	fleet.advance(bool(leaving.get("nebula", false)), nebula_sector)
+	fleet.advance(bool(leaving.get("nebula", false)), _nebula_sector())
 	for bid in fleet.newly_covered(map):
 		RebelFleet.overtake(map, bid, engine)
+
+
+func _nebula_sector() -> bool:
+	var d: XmlNode = engine.db.sectors.get(sector_desc)
+	if tree != null and sector_id >= 0:
+		return tree.sectors[sector_id].cls == "NEBULA"
+	return d != null and sector_desc.contains("NEBULA")
 
 
 ## Out of fuel, Wait (StarMap wait button → ShipManager::Wait): the fleet makes one move, then SetupNoFuel puts
 ## NO_FUEL / NO_FUEL_DISTRESS / NO_FUEL_FLEET(_DLC) (overtaken) on the current beacon, seeded by a fresh
 ## fuelEventSeed, and the ship "arrives" again at the same beacon.
+## StarMap::MouseClick on WAIT starts the 2 s `waiting` animation (dangerWaitStart = the fleet x): the map stays
+## open (wait / close inactive, beacons ignored) with the waiting text while UpdateDangerZone slides the fleet edge
+## by GetNextDangerMove × progress; `step_wait` (StarMapView, every frame) ends it with `_finish_wait`.
 func wait() -> void:
 	if LastStand.wait(self):
 		return
+	if wait_t < 0.0:
+		wait_t = 0.0
+		wait_fleet_x = fleet.center.x
+		selected = -1
+		_log("wait (fuel 0): %.1f s animation" % LastStand.WAIT_TIME)
+
+
+## The WAIT animation is running (boss level or out of fuel).
+func waiting() -> bool:
+	return wait_t >= 0.0 or LastStand.waiting(self)
+
+
+## AnimationTracker::Progress of the running WAIT animation (0..1).
+func wait_progress() -> float:
+	if LastStand.waiting(self):
+		return LastStand.wait_progress(self)
+	return clampf(wait_t / LastStand.WAIT_TIME, 0.0, 1.0) if wait_t >= 0.0 else 0.0
+
+
+## The fleet centre x drawn on the map: during the out-of-fuel WAIT animation dangerWaitStart + GetNextDangerMove ×
+## progress (UpdateDangerZone's waiting branch), else the fleet's own.
+func fleet_draw_x() -> float:
+	if wait_t < 0.0 or fleet == null:
+		return fleet.center.x if fleet != null else 0.0
+	return wait_fleet_x + fleet.next_move(bool(beacon().get("nebula", false)), _nebula_sector()) * wait_progress()
+
+
+## StarMap::OnLoop -> UpdateDangerZone while `waiting` runs (real time, the map open): once the tracker is done the
+## turn is taken (`_finish_wait`; the boss level: LastStand.step_wait).
+func step_wait(seconds: float) -> void:
+	if LastStand.waiting(self):
+		LastStand.step_wait(self, seconds)
+		return
+	if wait_t < 0.0:
+		return
+	wait_t += seconds
+	if wait_t >= LastStand.WAIT_TIME:
+		wait_t = -1.0
+		_finish_wait()
+
+
+## The end of the wait: the fleet move (+ overtaken beacons), SetupNoFuel, the map closes and GetWaitLocation
+## "arrives" at the same beacon (ShipManager::Wait instead of JumpLeave / JumpArrive: no jump animation).
+func _finish_wait() -> void:
 	map_open = false
 	selected = -1
 	_advance_fleet(beacon())
@@ -469,6 +524,7 @@ func wait() -> void:
 	_log("wait (fuel 0): %s, fleet x %d" % [n, int(fleet.center.x)])
 	_clear_location(true)
 	_arrive(false)
+	wait_arrival_serial = arrival_serial
 
 
 ## WorldManager::ClearLocation: own crew still aboard the ship at the beacon (CountCrew(enemy, true) > 0 -> flag
@@ -515,6 +571,9 @@ func _clear_location(waited := false) -> void:
 	ship._check_reactor()
 	DroneSystemRule.jump(ship)
 	CloakRule.jump(ship)
+	# The game keeps running through the 2 s jumpAnimation (CommandGui::OnLoop clears bPaused while bJumping), so the
+	# 0.5 s cloakingTracker has faded the decloaked hull back in by JumpArrive; our jump is instantaneous.
+	ship.cloak_fade = 0.0
 	BatteryRule.jump(ship)
 	ArtilleryRule.jump(ship)
 	MindRule.jump(ship)
@@ -585,7 +644,12 @@ func _arrive(count_visit: bool) -> void:
 	_arrival_env_done = false
 	if b.event.get("store", false) or ev.get("store", false):
 		_open_store_later()
-	_update_ftl_safe()
+	# SetSafe runs in WorldManager::OnLoop, which CApp::OnLoop skips while the arrival event box is open
+	# (CommandGui::IsPaused -> PauseLoop): with a box up it waits for the box to close (_close_dialog), where a
+	# choice may already have made the event ship hostile -> no SetSafe, so the cloaking / battery / teleporter
+	# cooldowns carried from a hostile beacon survive (rules/ftl_drive.md).
+	if not modal():
+		_update_ftl_safe()
 
 
 ## WorldManager::CreateLocation's images (rules/backgrounds.md §3): the first arrival draws the background
@@ -1066,7 +1130,12 @@ func preview(ev: Dictionary) -> String:
 	return "" if parts.is_empty() else "[" + ", ".join(parts) + "]"
 
 
-## The same preview as resource amounts for the choice's ResourceBox (ui/resource_box.gd).
+## The choice's ResourceBox (ui/resource_box.gd; ChoiceBox::SetChoices copies the choice event's whole
+## ResourceEvent, ChoiceBox::RenderResources(choice = true) draws it): the fuel / missiles / drone parts / scrap
+## amounts, the weapon / drone / augment it gives (second row) and a gained crew member — its CrewBlueprint exists
+## from the event's creation, so the row names who it is (icon, long name, skill icons): rolled here once
+## (`_prepare_crew`, kept in the choice event for `apply_effects`). Lost crew are not shown on a choice
+## (RenderResources: crew > 0 only when choice).
 func preview_res(ev: Dictionary) -> Dictionary:
 	var out := {}
 	if ev.is_empty():
@@ -1074,7 +1143,27 @@ func preview_res(ev: Dictionary) -> Dictionary:
 	for k in EventEngine.RES_KEYS:
 		if int(ev.res[k]) != 0:
 			out[k] = int(ev.res[k])
+	for kind in ["weapon", "drone", "augment"]:
+		if String(ev.get(kind, "")) != "":
+			out[kind] = String(ev[kind])
+	var cr: Dictionary = ev.get("crew", {})
+	if not cr.is_empty() and int(cr.get("amount", 0)) > 0:
+		_prepare_crew(ev)
+		var item := _pending_crew_item(ev)
+		if not item.is_empty():
+			out["crew"] = [item]
 	return out
+
+
+## The reward-box entry of the crew member `_prepare_crew` rolled for `ev` ({} = none).
+func _pending_crew_item(ev: Dictionary) -> Dictionary:
+	var pend: Dictionary = ev.get("crew_pending", {})
+	if pend.is_empty():
+		return {}
+	var ident: Dictionary = pend.ident
+	return {"name": String(ident.get("name", "")), "lost": false, "race": String(ev.crew.race),
+		"male": bool(ident.get("male", true)), "colors": (ident.get("colors", []) as Array).duplicate(),
+		"skills": (pend.skills as Dictionary).duplicate()}
 
 
 const RES_LABEL := {"fuel": "Fuel", "missiles": "Missiles", "drones": "Drone Parts", "scrap": "Scrap"}
@@ -1238,12 +1327,9 @@ func event_rewards(ev: Dictionary) -> Array:
 			if bool(lose.get("traitor", false)):
 				rw.traitor = true
 			out.append(["crew_lost", c.race, rw])
-	var pend: Dictionary = ev.get("crew_pending", {})
-	if not pend.is_empty():
-		var ident: Dictionary = pend.ident
-		out.append(["crew", ev.crew.race, {"name": String(ident.get("name", "")), "lost": false,
-			"race": String(ev.crew.race), "male": bool(ident.get("male", true)),
-			"colors": (ident.get("colors", []) as Array).duplicate(), "skills": (pend.skills as Dictionary).duplicate()}])
+	var pend_item := _pending_crew_item(ev)
+	if not pend_item.is_empty():
+		out.append(["crew", ev.crew.race, pend_item])
 	if ev.remove != "":
 		out.append(["removed", ev.remove])
 	if not ev.upgrade.is_empty():
@@ -1575,8 +1661,13 @@ func check_combat(es: ShipState, seconds := 0.0) -> String:
 		return combat_outcome("destroyed")
 	if not enemy.hostile or es.is_destroyed():
 		return ""
-	if enemy.has_surrender and not enemy.surrendered and es.hull >= 1 and es.hull <= int(enemy.surrender_threshold):
-		return combat_outcome("surrender")
+	if not enemy.surrendered and es.hull >= 1 and es.hull <= int(enemy.surrender_threshold):
+		if enemy.has_surrender:
+			return combat_outcome("surrender")
+		# ShipAI::Surrender with no <surrender> event (threshold L/2): `surrendered` is set but GetBaseEvent("")
+		# shows nothing; the ship fights on and can no longer start an escape (ShipAI::Escape checks it).
+		enemy.surrendered = true
+		return ""
 	if not enemy.escaping and not enemy.surrendered and es.hull >= 1 and es.hull <= int(enemy.escape_threshold):
 		enemy.escaping = true
 		if not enemy.get("has_escape", false):

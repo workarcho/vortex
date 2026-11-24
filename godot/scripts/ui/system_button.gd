@@ -49,7 +49,7 @@ func _process(d: float) -> void:
 	warning_time = maxf(warning_time - d, 0.0)
 	if ship and ship.sys(kind) and TooltipService.over(self, Rect2(Vector2.ZERO, size)):
 		var half := _half_at(TooltipService.local_pointer(self))
-		var tip := tooltip_for(half)
+		var tip := tooltip_for(half) if half >= 0 else ""
 		if tip != "":
 			TooltipService.request(tip, {"kind": &"button", "source": self, "ctx": {"button": kind, "half": half}})
 	queue_redraw()
@@ -108,16 +108,50 @@ func tooltip_for(half: int) -> String:
 	return ""
 
 
+## The hovered button (0, or the teleporter / door half), -1 = none. PC: the vanilla Button hit boxes (hit_rects,
+## strict test as GenericButton::MouseMove); touch (a live TouchPowerToggle): the whole control (the doors keep
+## their two boxes), the teleporter split in halves.
 func _half_at(p: Vector2) -> int:
-	if kind == "doors":  # DoorBox hit boxes: close (10, 10, 20, 20), open (10, 33, 20, 20)
-		if Rect2(10, 10, 20, 20).has_point(p):
-			return 0
-		if Rect2(10, 33, 20, 20).has_point(p):
-			return 1
+	if kind == "doors" or not TouchPowerToggle.live():
+		var rs := hit_rects(ship, kind)
+		for i in rs.size():
+			var r: Rect2 = rs[i]
+			if kind == "doors" and r.has_point(p) or SystemPowerColumn.strictly_inside(r, p):
+				return i
 		return -1
 	if kind != "teleporter":
 		return 0
 	return 0 if p.y < size.y / 2 else 1
+
+
+func _has_point(p: Vector2) -> bool:
+	if TouchPowerToggle.live():
+		return Rect2(Vector2.ZERO, size).has_point(p)
+	return _half_at(p) >= 0
+
+
+## Button hit boxes in this control's coordinates (= the box's buttonOffset), one per half (rules/hud_layout.md
+## "Per system", from the box ctors' Button::OnInit hitStats): CloakingBox by the current button (effective power
+## 0 -> 1, capped at 4) (10, 59 − 12·L, 20, 7 + 12·L); BatteryBox (9, 22, 20, 43); MindBox (10, 35, 20, 31); HackBox
+## drone button (10, 36, 20, 20), pulse buttons (10, 50 − 12·L, 20, 7 + 12·L); TeleportBox / DoorBox (10, 10, 20, 20)
+## and (10, 33, 20, 20). The artillery box has no button.
+static func hit_rects(sh: ShipState, k: String) -> Array:
+	var s := sh.sys(k) if sh != null else null
+	var lvl := level_of(s.effective_power()) if s != null else 1
+	match k:
+		"cloaking":
+			return [Rect2(10, 59 - 12 * lvl, 20, 7 + 12 * lvl)]
+		"battery":
+			return [Rect2(9, 22, 20, 43)]
+		"mind":
+			return [Rect2(10, 35, 20, 31)]
+		"hacking":
+			if sh != null and sh.hacking:
+				return [Rect2(10, 50 - 12 * lvl, 20, 7 + 12 * lvl)]
+			return [Rect2(10, 36, 20, 20)]
+		"teleporter", "doors":
+			return [Rect2(10, 10, 20, 20), Rect2(10, 33, 20, 20)]
+	return []
 
 
 ## Button action (also used by CLI flags): half 0 = send / on, 1 = retrieve.

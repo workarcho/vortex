@@ -42,16 +42,17 @@ func clear_sector() -> void:
 	used_text.clear()
 
 
-## RandomAmount::SelectAmount: chance of none, then min if max == 0, else uniform [min, max].
+## RandomAmount::SelectAmount: chance of none, then min if max == 0, else uniform [min, max]. EventsParser::PullMinMax
+## already swapped a max below min when the data was read (so min="3" max="0" rolls [0, 3]).
 func select_amount(mn: int, mx: int, chance := -1.0) -> int:
-	if chance > 0.0 and r(100) < int(100.0 * chance):
-		return 0
-	if mx == 0:
-		return mn
 	if mx < mn:
 		var t := mn
 		mn = mx
 		mx = t
+	if chance > 0.0 and r(100) < int(100.0 * chance):
+		return 0
+	if mx == 0:
+		return mn
 	return mn + r(mx + 1 - mn)
 
 
@@ -495,17 +496,29 @@ func setup_ship(ship_ev: Dictionary) -> Dictionary:
 	var out := {"blueprint": bp, "has_surrender": false, "has_escape": false, "surrender_threshold": -100,
 		"escape_threshold": -100, "escape_timer": 15.0}
 	var sur := tmpl.child("surrender")
-	if sur != null:
-		out.has_surrender = true
-		out.surrender_threshold = level / 2 + select_amount(int(sur.attr("min", "0")), int(sur.attr("max", "0")),
-			float(sur.attr("chance", "-1")))
 	var esc := tmpl.child("escape")
+	out.has_surrender = sur != null
+	out.has_escape = esc != null
+	# ShipAI constructor: surrender rand%5+1, escape rand%5+1 (the escape value is overwritten below).
+	var ctor_surrender := r(5) + 1
+	r(5)
+	# WorldManager::CreateShip (0x5eee10), escape first: SetEscapeThreshold(L/2 + SelectAmount) (-1 when equal to the
+	# constructor's surrender value), then SetSurrenderThreshold(L/2 + SelectAmount) (escape = value - 1 when equal).
+	# A missing <surrender> / <escape> is a RandomAmount {0, 0, chance -1} (ShipEvent ctor): L/2 + 0. Such a ship
+	# "surrenders" silently at that hull (no event, RunState.check_combat), which also ends its escape chances;
+	# without an escape event it never flees (Escape -> no event -> CancelEscape). EventsParser::PullMinMax:
+	# chance = probability of none (`chance="0.5"` -> half the ships never surrender), min / max swapped if reversed.
+	var esc_v := level / 2 + (select_amount(int(esc.attr("min", "0")), int(esc.attr("max", "0")),
+		float(esc.attr("chance", "-1"))) if esc != null else 0)
+	if esc_v == ctor_surrender:
+		esc_v -= 1
+	var sur_v := level / 2 + (select_amount(int(sur.attr("min", "0")), int(sur.attr("max", "0")),
+		float(sur.attr("chance", "-1"))) if sur != null else 0)
+	if sur_v == esc_v:
+		esc_v = sur_v - 1
+	out.surrender_threshold = sur_v
+	out.escape_threshold = esc_v
 	if esc != null:
-		out.has_escape = true
-		out.escape_threshold = level / 2 + select_amount(int(esc.attr("min", "0")), int(esc.attr("max", "0")),
-			float(esc.attr("chance", "-1")))
-		if out.escape_threshold == out.surrender_threshold:
-			out.escape_threshold -= 1
 		out.escape_timer = float(esc.attr("timer", "0")) if float(esc.attr("timer", "0")) > 0 else 15.0
 	rng = saved
 	return out

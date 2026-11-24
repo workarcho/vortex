@@ -270,6 +270,13 @@ func _crew_sounds() -> void:
 		c.last_ion_discharges = c.ion_discharges
 
 
+## Crew standing in `room` are not drawn as themselves (ShipManager::OnRender): the interior is hidden, or the room
+## is blacked out (then at most the life-sign outline of _draw_crew). The teleport animation is part of the crew
+## render (CrewAnimation), so it follows the same gate (Space._draw_teleports).
+func crew_hidden(room: int) -> bool:
+	return not drew_interior or _blk.has(room)
+
+
 func _draw_crew() -> void:
 	var life := not _blk.is_empty() and ship.player_detects_life()
 	for c in ship.crew:

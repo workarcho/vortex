@@ -49,7 +49,8 @@ const SPEED_STEPS := [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0]
 const SPEED_NORMAL := 2  # index of 1x
 
 const SCANNERS_AUG := "ADV_SCANNERS"  # blueprints.xml <augBlueprint name="ADV_SCANNERS"> (Long-Ranged Scanners)
-const SCANNER_FILES := ["data/blueprints.xml", "data/dlcBlueprints.xml"]
+## dlcBlueprintsOverwrite.xml holds the type C player ships (PLAYER_SHIP_*_3, e.g. the Rock C): patched too.
+const SCANNER_FILES := ["data/blueprints.xml", "data/dlcBlueprints.xml", "data/dlcBlueprintsOverwrite.xml"]
 const MAX_AUGMENTS := 3
 const ENEMY_BAR_SEGMENTS := 22.0  # box_hostiles_hull2.png: 22 segments
 const MANUAL_OFF := "qol_manual_off"  # drone meta: depowered by the player while AUTO is on
@@ -456,10 +457,14 @@ func weapon_stat_groups(bp: Dictionary, ae := true) -> Array:
 	var g3 := [qt("qol_room_damage" if ty == "BEAM" else "qol_hull_damage", int(bp.get("damage", 0)))]
 	if int(bp.get("ion", 0)) != 0:
 		g3.append(qt("qol_ion_damage", int(bp.ion)))
-	if int(bp.get("sys_damage", 0)) != 0:
-		g3.append(qt("qol_system_damage", int(bp.sys_damage)))
-	if int(bp.get("pers_damage", 0)) != 0:
-		g3.append(qt("qol_crew_damage", 15 * int(bp.pers_damage)))
+	# Negative system / crew damage repairs / heals (BOMB_HEAL_SYSTEM, BOMB_HEAL): shown as such, as a positive
+	# amount. Vanilla (WeaponBlueprint::GetDescription) lists crew damage only when > 0 and has no heal line.
+	var sysd := int(bp.get("sys_damage", 0))
+	if sysd != 0:
+		g3.append(qt("qol_system_damage", sysd) if sysd > 0 else qt("qol_system_repair", -sysd))
+	var persd := int(bp.get("pers_damage", 0))
+	if persd != 0:
+		g3.append(qt("qol_crew_damage", 15 * persd) if persd > 0 else qt("qol_crew_heal", -15 * persd))
 	var sp := int(bp.get("sp", 0))
 	if sp != 0:
 		g3.append(T.f("shield_piercing", sp))

@@ -293,9 +293,12 @@ func _draw_drones() -> void:
 
 
 ## Crew in a teleport animation (rules/teleporter.md): the race's <race>_teleport strip (0.5 s) forward
-## while dematerialising, reversed while materialising, over a pale beam glow.
+## while dematerialising, reversed while materialising, over a pale beam glow. Not in a blacked-out room or a hidden
+## interior (ShipView.crew_hidden): boarders arriving in the dark stay unseen (life signs are drawn by ShipView).
 func _draw_teleports() -> void:
 	for c in ship.teleporting:
+		if view != null and view.crew_hidden(c.room):
+			continue
 		var e: Dictionary = ship.teleporting[c]
 		var p := clampf(float(e.t) / TeleporterRule.ANIM_TIME, 0.0, 1.0)
 		if int(e.phase) == 1:

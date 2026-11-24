@@ -183,9 +183,34 @@ func symbol_texture(time: float, n := 1) -> Texture2D:
 		"img/icons/s_%s_%s1.png" % [id, c]])
 
 
-## Power the system runs with (subsystems: their maximum).
+## Power the system runs with (GetEffectivePower: power + bonus + battery + manning boost). Subsystems: see
+## sub_power.
 func effective_power() -> int:
-	return (max_power() if is_subsystem() else power + bonus_power) + manning_boost
+	return (sub_power() if is_subsystem() else power + bonus_power) + manning_boost
+
+
+## Subsystem power (pilot, sensors, doors, battery: bNeedsPower false; powerState.first). ShipSystem::CheckMaxPower
+## (every frame) sets it to the usable maximum while the system is not locked; while locked it is only clamped down
+## to it. Ion damage (ShipSystem::IonDamage -> ForceDecreasePower: power - amount, min 0) therefore weakens a
+## subsystem until its lock runs out: ionized sensors lose their vision (DoSensorsProvide / CheckVision read
+## GetEffectivePower), ionized piloting its evasion. A hack pulse only freezes the value (still the maximum).
+func sub_power() -> int:
+	return mini(power, max_power()) if ion != 0 else max_power()
+
+
+## CheckMaxPower for a subsystem, once per frame (ShipState.tick): unlocked -> the usable maximum; locked or under a
+## hack pulse -> clamped down only (a bar broken during the lock stays lost after a repair until the lock ends).
+func check_max_power_sub() -> void:
+	if not is_subsystem():
+		return
+	power = mini(power, max_power()) if is_power_locked() else max_power()
+
+
+## A lock starting on an unlocked subsystem: powerState.first is the usable maximum at that moment (CheckMaxPower
+## kept it there every frame), the value ion damage then lowers.
+func _sub_lock_start() -> void:
+	if is_subsystem() and ion == 0:
+		power = max_power()
 
 
 ## IsSystemHacked: the hack level while under attack, else 0.
@@ -216,6 +241,8 @@ func is_ionized() -> bool:
 
 ## ShipSystem::LockSystem(n): sets the counter (does not add) and restarts the 5 s unit timer.
 func lock_system(n: int) -> void:
+	if n != 0:
+		_sub_lock_start()
 	ion_stunned = false
 	ion = n
 	ion_timer = 0.0
@@ -224,6 +251,7 @@ func lock_system(n: int) -> void:
 
 ## ShipSystem::AddLock(n): from -1 or 0 the counter becomes n, else min(count + n, 5); timer restarted.
 func add_lock(n: int) -> void:
+	_sub_lock_start()
 	ion_stunned = false
 	if ion <= 0:
 		ion = n
@@ -253,6 +281,7 @@ func tick_ion(seconds: float) -> bool:
 
 
 func add_ion(amount: int) -> void:
+	_sub_lock_start()
 	ion_stunned = true
 	if ion <= 0:
 		ion = amount

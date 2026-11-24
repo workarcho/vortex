@@ -143,7 +143,10 @@ static func img(ci: CanvasItem, rel: String, p: Vector2, col := Color.WHITE) -> 
 ## TextButton (TextButton::InitPrimitives / OnRender) [exe]: a plate with stepped corners of `inset` px in
 ## COLOR_BUTTON_ON (active), COLOR_BUTTON_SELECT (hovered) or COLOR_BUTTON_OFF (inactive), label in
 ## COLOR_BUTTON_TEXT, centred (font 63 by default).
-static func text_button(ci: CanvasItem, r: Rect2, label: String, state: String, font := 63, inset := 3) -> void:
+## `text_dy`: extra label offset (TextButton centres the label on the button: a 36 px button puts it 2 px lower than
+## the 32 px ones this helper's font-63 placement was matched on).
+static func text_button(ci: CanvasItem, r: Rect2, label: String, state: String, font := 63, inset := 3,
+		text_dy := 0) -> void:
 	var fill := COL_TEXT
 	if state == "hot":
 		fill = COL_HOT
@@ -156,7 +159,7 @@ static func text_button(ci: CanvasItem, r: Rect2, label: String, state: String, 
 	ci.draw_rect(Rect2(r.position.x, r.position.y + inset, r.size.x, r.size.y - 2 * inset), fill)
 	var lh := FtlData.ftl_line_height(font)
 	var ty := r.position.y + 3 if font == 63 else r.position.y + (r.size.y - lh) / 2.0
-	FtlData.draw_ftl_text(ci, font, label, Vector2(r.get_center().x, ty), COL_DARK, 1)
+	FtlData.draw_ftl_text(ci, font, label, Vector2(r.get_center().x, ty + text_dy), COL_DARK, 1)
 
 
 ## InfoBox [inferred layout]: title (font 62), wrapped body (font 10), optional red line at the bottom.

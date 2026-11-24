@@ -145,7 +145,9 @@ func _draw() -> void:
 	var rows_h := 0.0
 	for c in choices:
 		var res: Dictionary = c[3]
-		var bw := ResourceBox.measure(res).x
+		var bsz := ResourceBox.measure(res)
+		var bw := bsz.x
+		var bh := bsz.y  # MeasureResources height: 32, more with a second row (items / crew)
 		var label := "%d. %s" % [rows.size() + 1, c[0]]
 		var cl := FtlData.ftl_wrap(FONT, label, WRAP)
 		var wide := 0
@@ -156,10 +158,12 @@ func _draw() -> void:
 		if bw > 0:
 			if wide + bw > WRAP:  # text wrapped narrower so the box fits after it
 				cl = FtlData.ftl_wrap(FONT, label, 0x221 - int(bw))
+			# ChoiceBox::OnRender: the row is max(box height, text + 12) tall and a shorter text is centred on the
+			# box height ((h − text) × 0.5).
 			var th := cl.size() * LINE
-			if th < ResourceBox.ICON:
-				off = (ResourceBox.ICON - th) * 0.5
-			rh = maxf(ResourceBox.ICON, th + 12.0) + 10.0
+			if th < bh:
+				off = (bh - th) * 0.5
+			rh = maxf(bh, th + 12.0) + 10.0
 		if touch:
 			rh = maxf(rh, 44.0)
 		rows.append([cl, off, rh, bw])
@@ -218,7 +222,7 @@ func _draw() -> void:
 			# choices draw it with a 0.75 tint.
 			var cy := y0 + off + cl.size() * LINE * 0.5 - 3.0
 			var bcol := col * Color(0.75, 0.75, 0.75) if not choices[i][2] else col
-			ResourceBox.draw(self, res, Vector2(tx + widest + 10, cy - ResourceBox.ICON / 2.0), bcol)
+			ResourceBox.draw(self, res, Vector2(tx + widest + 10, cy - ResourceBox.measure(res).y / 2.0), bcol)
 		y += rh
 
 

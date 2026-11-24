@@ -161,8 +161,9 @@ static func finish(d: Dictionary, ctx := {}) -> Dictionary:
 
 
 ## Primary frame rect (WindowFrame(7, 7, 323, h) drawn at location + (0, 67)).
-static func frame_rect(loc: Vector2, kind: String, h := -1) -> Rect2:
-	return Rect2(loc + Vector2(7, 74), Vector2(W, h if h >= 0 else int(FRAME_H.get(kind, 121))))
+## `w` = the frame width (InfoBox::SetDescription width; default 323).
+static func frame_rect(loc: Vector2, kind: String, h := -1, w := W) -> Rect2:
+	return Rect2(loc + Vector2(7, 74), Vector2(w, h if h >= 0 else int(FRAME_H.get(kind, 121))))
 
 
 ## TIP frame rect: top at location.y + 77 + descBoxSize.y (+ yShift), height max(60, text + 35) − 4 where text =
@@ -182,10 +183,10 @@ static func _height(font: int, t: String, wrap: int) -> int:
 
 
 ## Height of the primary frame's text (title, warning, description, price) from the frame's top inner edge.
-static func text_height(d: Dictionary) -> int:
-	var h := 6 + _height(16, String(d.title), DESC_W)
-	h += (10 + _height(10, String(d.warning), DESC_W)) if String(d.warning) != "" else 15
-	h += _height(10, String(d.desc), DESC_W)
+static func text_height(d: Dictionary, dw := DESC_W) -> int:
+	var h := 6 + _height(16, String(d.title), dw)
+	h += (10 + _height(10, String(d.warning), dw)) if String(d.warning) != "" else 15
+	h += _height(10, String(d.desc), dw)
 	if String(d.get("price", "")) != "":
 		h += 2 * FtlData.ftl_line_height(10)
 	return h
@@ -206,22 +207,24 @@ static func draw_price(ci: CanvasItem, price: String, at: Vector2) -> void:
 
 ## InfoBox::OnRender for `content()` at `loc` (= InfoBox.location): returns the y below the description (crew
 ## skills etc. go there).
-static func draw(ci: CanvasItem, loc: Vector2, d: Dictionary, frame_h := -1) -> float:
+## `w` = the frame width (InfoBox::SetDescription width; the text wraps at descBoxSize.x = w − 18).
+static func draw(ci: CanvasItem, loc: Vector2, d: Dictionary, frame_h := -1, w := W) -> float:
+	var dw := w - 18
 	var base_h := frame_h if frame_h >= 0 else int(FRAME_H.get(String(d.kind), 121))
-	var fh := maxi(base_h, text_height(d) + 12)  # grows only when a mod's content does not fit (vanilla fits)
-	WindowFrame.draw(ci, frame_rect(loc, String(d.kind), fh))
+	var fh := maxi(base_h, text_height(d, dw) + 12)  # grows only when a mod's content does not fit (vanilla fits)
+	WindowFrame.draw(ci, frame_rect(loc, String(d.kind), fh, w))
 	var x := loc.x + 18
 	var y := loc.y + 67 + 13
-	FtlData.draw_ftl_text(ci, 16, String(d.title), Vector2(x, y), Color.WHITE, 0, DESC_W)
-	y += _height(16, String(d.title), DESC_W)
+	FtlData.draw_ftl_text(ci, 16, String(d.title), Vector2(x, y), Color.WHITE, 0, dw)
+	y += _height(16, String(d.title), dw)
 	if String(d.warning) != "":
 		y += 10
-		FtlData.draw_ftl_text(ci, 10, String(d.warning), Vector2(x, y), COL_WARN, 0, DESC_W)
-		y += _height(10, String(d.warning), DESC_W)
+		FtlData.draw_ftl_text(ci, 10, String(d.warning), Vector2(x, y), COL_WARN, 0, dw)
+		y += _height(10, String(d.warning), dw)
 	else:
 		y += 15
-	FtlData.draw_ftl_text(ci, 10, String(d.desc), Vector2(x, y), Color.WHITE, 0, DESC_W)
-	y += _height(10, String(d.desc), DESC_W)
+	FtlData.draw_ftl_text(ci, 10, String(d.desc), Vector2(x, y), Color.WHITE, 0, dw)
+	y += _height(10, String(d.desc), dw)
 	if String(d.get("price", "")) != "":
 		y += FtlData.ftl_line_height(10)
 		draw_price(ci, String(d.price), Vector2(x, y))

@@ -674,6 +674,8 @@ func ion_system(id: String, amount: int) -> void:
 				break
 	elif id == "drones":
 		DroneSystemRule.force_decrease(self, amount)
+	elif s.is_subsystem():
+		s.power = maxi(s.power - amount, 0)  # ForceDecreasePower, bNeedsPower false: no reactor / battery bars
 	else:
 		_set_power(s, maxi(s.power - amount, 0))
 	_clamp_shields()
@@ -1419,6 +1421,7 @@ func tick(f: float) -> void:
 	for s in systems.values():
 		if s.tick_ion(seconds):
 			_on_unlocked(s)
+		s.check_max_power_sub()  # subsystems: back to full once unlocked (ShipSystem::OnLoop -> CheckMaxPower)
 	HackingRule.tick(self, seconds)
 	MindRule.tick(self, seconds)
 	DroneSystemRule.tick(self, seconds)
@@ -1506,6 +1509,12 @@ func _auto_repair(seconds: float) -> void:
 
 func opponent_cloaked() -> bool:
 	return opponent != null and opponent.is_cloaked()
+
+
+## ShipManager::current_target / Shields::bEnemyPresent (SetTarget): another ship is at the beacon, hostile or
+## not (a neutral or surrendered ship still counts); cleared once it is gone (destroyed, or jumped away).
+func has_target_ship() -> bool:
+	return opponent != null and not opponent.destroyed_done() and not opponent.jumping
 
 
 ## Reactor overuse (rules/power.md "Reactor"): while more reactor bars are in use than available, one
@@ -1599,8 +1608,11 @@ func _tick_shields(f: float) -> void:
 ## Evasion roll (ShipManager::GetDodged; also used by bombs): a dodge trains pilot and engines.
 func roll_dodged(rng: RandomNumberGenerator) -> bool:
 	if EvasionRule.roll_dodge(dodge_factor(), rng):
-		_gain_manning_skill("pilot")
-		_gain_manning_skill("engines")
+		# ShipManager::GetDodged queues the dodge skill event (EventSystem 7, CrewMember::CheckSkills) only for the
+		# player ship, not cloaked, with a target ship or intruders aboard: an asteroid dodged alone trains nobody.
+		if not is_cloaked() and (has_target_ship() or not intruders().is_empty()):
+			_gain_manning_skill("pilot")
+			_gain_manning_skill("engines")
 		Hooks.emit(&"dodge_rolled", self, true)
 		return true
 	Hooks.emit(&"dodge_rolled", self, false)  # ACH_BAD_DODGING (AchievementTracker)
@@ -1619,7 +1631,10 @@ func on_projectile_enters_shield(d: Damage, rng: RandomNumberGenerator, at := Ve
 			shield_popped(p, true)
 		return "super"
 	if shield_layers > d.shield_piercing:
-		_gain_manning_skill("shields")
+		# Shields::CollisionReal: the shield skill event (8) needs damage > 0, the player ship and bEnemyPresent
+		# (ShipManager::SetTarget: a target ship). Ion-only shots and asteroids with no ship around train nobody.
+		if d.damage > 0 and has_target_ship():
+			_gain_manning_skill("shields")
 		# ION_ARMOR (Shields::CollisionReal): the ion part of a shield hit is ignored on a successful roll.
 		shield_ion_resisted = d.ion > 0 and AugmentRule.ion_resist(self, rng)
 		if shield_ion_resisted:

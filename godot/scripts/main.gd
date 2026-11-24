@@ -314,7 +314,9 @@ func _run_cli_partb(a: String, p: InputProfile) -> void:
 		_debug_close_dialogs()
 	elif a == "--wait":
 		_debug_close_dialogs()
-		print("wait: %s, event %s" % [run.apply(RunIntent.make(RunIntent.WAIT)), run.dialog.get("name", "-")])
+		var ok := run.apply(RunIntent.make(RunIntent.WAIT))
+		run.step_wait(LastStand.WAIT_TIME)  # the 2 s map animation at once
+		print("wait: %s, event %s" % [ok, run.dialog.get("name", "-")])
 	elif a.begins_with("--ship-screen="):
 		_debug_close_dialogs()
 		print("ship screen %s: %s" % [v, run.apply(ShipManagement.make(RunIntent.OPEN_SHIP_SCREEN, {"arg": int(v)}))])
@@ -1760,8 +1762,10 @@ func _run_process(delta: float) -> bool:
 	if _jump_phase != "":
 		_jump_step(delta)
 		return false
-	if run.arrival_serial != _built_arrival and (_map_was_open or _sector_key() != _built_sector) \
-			and player_space != null:
+	# Waiting (out of fuel / last stand) "arrives" at the same beacon without leaving it (CommandGui::OnLoop:
+	# GetWaitLocation -> ShipManager::Wait, no JumpLeave): no jump animation / sounds, the location is just rebuilt.
+	if run.arrival_serial != _built_arrival and run.arrival_serial != run.wait_arrival_serial \
+			and (_map_was_open or _sector_key() != _built_sector) and player_space != null:
 		# A jump picked on the beacon map, or a sector jump (sector map choice: StarMap::OnLoop readyToTravel with
 		# potentialLoc = dummyNewSector; the secret sector event: CommandGui::OnLoop secretSector -> dummyNewSector):
 		# CommandGui::OnLoop runs ShipManager::JumpLeave for every new location alike, before it is built.
@@ -1797,6 +1801,10 @@ func _run_process(delta: float) -> bool:
 			run.hazard.tick(seconds, hz_ships, combat)
 	if has_enemy and combat.ais.has(enemy_space):
 		combat.ais[enemy_space].hostile = bool(run.enemy.get("hostile", false))
+		# ShipAI::escaping / escapeTimer live in the run (RunState.check_combat); the AI reads them for its power
+		# priorities (CheckPowerLevels: no weapons / drones while escaping) and RequiredEvac (< 15 s left).
+		combat.ais[enemy_space].escaping = bool(run.enemy.get("escaping", false))
+		combat.ais[enemy_space].escape_timer = float(run.enemy.get("escape_timer", 15.0))
 		var outcome := run.check_combat(enemy_space.ship, seconds)
 		if outcome != "":
 			print("combat outcome: %s, rewards %s" % [outcome, str(run.dialog_rewards)])

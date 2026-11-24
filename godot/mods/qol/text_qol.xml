@@ -9,6 +9,8 @@
 <text name="qol_ion_damage">Ion Damage: \1</text>
 <text name="qol_system_damage">Extra System Damage: \1</text>
 <text name="qol_crew_damage">Extra Crew Damage: \1</text>
+<text name="qol_crew_heal">Crew Healing: \1</text>
+<text name="qol_system_repair">System Repair: \1</text>
 <text name="qol_stun">Stun Duration: \1 seconds</text>
 <text name="qol_fire_chance">Fire Chance: \1%</text>
 <text name="qol_breach_chance">Breach Chance: \1%</text>

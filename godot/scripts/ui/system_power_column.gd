@@ -43,17 +43,22 @@ func _process(delta: float) -> void:
 	_time += delta
 	warning.update(delta)
 	# SystemBox::OnLoop / MouseMove: player box with bShowPower -> GenerateTooltip, W300, delayed.
-	if ship and ship.is_player and ship.sys(system_id) and TooltipService.over(self, hit_rect()):
+	if ship and ship.is_player and ship.sys(system_id) and TooltipService.over(self, tooltip_rect()):
 		TooltipService.request(TooltipText.system(ship, system_id), {"width": TooltipService.WRAP_BOX,
 			"kind": &"system", "source": self, "ctx": {"ship": ship, "system": system_id}})
 	queue_redraw()
 
 
-## Mouse column: the bars and the symbol (x+16..x+48, from the top bar to the symbol's bottom).
+## Mouse area. Touch (a live TouchPowerToggle): the whole column (hit_rect). PC: the vanilla areas only, the
+## tooltip column (tooltip_rect) and the click square on the symbol (click_rect) [exe SystemBox::MouseMove].
 func _has_point(p: Vector2) -> bool:
-	return hit_rect().has_point(p)
+	if TouchPowerToggle.live():
+		return hit_rect().has_point(p)
+	return strictly_inside(tooltip_rect(), p) or strictly_inside(click_rect(), p)
 
 
+## Touch / layout column: the bars and the symbol (x+16..x+48, from one pitch above the top bar to the symbol's
+## bottom). Also the drawn bounds used by the touch layouts.
 func hit_rect() -> Rect2:
 	var s := ship.sys(system_id) if ship else null
 	var n := s.get_level() if s else 1
@@ -61,9 +66,34 @@ func hit_rect() -> Rect2:
 	return Rect2(16, top, 32, ABOVE + 48 - top)
 
 
+## SystemBox::MouseMove `mouseHover` [exe 004d3b30]: loc.x + 21 < mX < loc.x + 42 and loc.y + 21 < mY < loc.y + 42
+## (strict) — the system symbol only. Left / right clicks (SystemBox::MouseClick / MouseRightClick) and the hovered
+## symbol need it: clicking the bars does nothing on PC.
+func click_rect() -> Rect2:
+	return Rect2(21, ABOVE + 21, 21, 21)
+
+
+## SystemBox::OnRender `hitBox` (tooltip area, strict test in MouseMove): x loc.x + 24, w 15, from topPower + 16 to
+## loc.y + 31, topPower = RenderPowerBoxes' return (the top item − 20: bars, manning icon, lock / status icons).
+## Touch: the whole column (hit_rect).
+func tooltip_rect() -> Rect2:
+	if TouchPowerToggle.live():
+		return hit_rect()
+	var top := (_top_item if _top_item >= 0.0 else hit_rect().position.y + HudLayout.POWER_PITCH - 6.0) - 20.0 + 16.0
+	return Rect2(24, top, 15, ABOVE + 31 - top)
+
+
+## The vanilla hit tests are strict on every edge (GenericButton / SystemBox: x < mX < x + w).
+static func strictly_inside(r: Rect2, p: Vector2) -> bool:
+	return p.x > r.position.x and p.x < r.end.x and p.y > r.position.y and p.y < r.end.y
+
+
+var _top_item := -1.0  # y (control coordinates) of the top item drawn by draw_box (-1 = not drawn yet)
+
+
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_MOUSE_ENTER:
-		hovered = true
+		hovered = TouchPowerToggle.live()  # PC: set by the motion inside click_rect (_gui_input)
 	elif what == NOTIFICATION_MOUSE_EXIT:
 		hovered = false
 
@@ -78,6 +108,8 @@ func cancel_press() -> void:
 
 
 func _gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion and not TouchPowerToggle.live():
+		hovered = strictly_inside(click_rect(), event.position)
 	if not clickable or not event is InputEventMouseButton:
 		return
 	if event.button_index == MOUSE_BUTTON_LEFT and TouchPowerToggle.live():
@@ -92,8 +124,8 @@ func _gui_input(event: InputEvent) -> void:
 					increase_requested.emit(system_id)
 		accept_event()
 		return
-	if not event.pressed:
-		return
+	if not event.pressed or not strictly_inside(click_rect(), event.position):
+		return  # PC: only the symbol square takes the clicks (SystemBox::MouseClick needs mouseHover)
 	if event.button_index == MOUSE_BUTTON_LEFT:
 		increase_requested.emit(system_id)
 		accept_event()
@@ -109,6 +141,7 @@ func _draw() -> void:
 	var clone := system_id == "clonebay" and ship.is_player
 	var top := draw_box(self, ship, s, Vector2(0, ABOVE), _time, true, true, hovered and clickable,
 		CloneQueueBox.height_modifier(ship) if clone else 0)
+	_top_item = top
 	if clone:  # CloneBox::OnRender: queue box above the bars (topPower = RenderPowerBoxes' return = top - 20)
 		CloneQueueBox.draw(self, ship, Vector2(0, ABOVE), top - 20.0, _time)
 	if warning.running():

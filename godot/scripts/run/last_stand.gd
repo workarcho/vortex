@@ -349,6 +349,7 @@ static func _finish_wait(run: RunState) -> void:
 	run._log("wait (last stand): flagship at %d" % boss_beacon(run))
 	run._clear_location(true)
 	run._arrive(false)
+	run.wait_arrival_serial = run.arrival_serial  # GetWaitLocation: ShipManager::Wait, no jump animation
 
 
 # ------------------------------------------------------------------ the fight (WorldManager / BossShip)
