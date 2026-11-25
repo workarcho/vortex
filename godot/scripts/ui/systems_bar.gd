@@ -33,6 +33,9 @@ var _signature := ""  # installed systems + slots the boxes were built for (rebu
 ## `sub_group` (a child Control at the frame origin) so the owner can move them apart from the bar.
 var detach_subsystems := false
 var sub_group: Control = null
+## Touch phone column layout (main.gd `_touch_layout_band`): the weapons / drones boxes are drawn in the column, so
+## the wire ends at the last bar box (its cap) instead of running on under their PC slots.
+var wire_main_only := false
 
 ## The boxes were rebuilt because the ship's systems changed (store purchase, removal): the owner re-places the
 ## weapons / drones panels (their box locations moved).
@@ -204,6 +207,9 @@ func hud_hit(screen: Vector2) -> bool:
 	for col: SystemPowerColumn in columns.values():  # tall bar columns reach above the strip
 		if col.is_visible_in_tree() and col.hit_rect().has_point(col.get_global_transform().affine_inverse() * screen):
 			return true
+	for b: SystemButton in buttons.values():  # (a button may be drawn away from its box: the touch doors buttons)
+		if b.is_visible_in_tree() and b._has_point(b.get_global_transform().affine_inverse() * screen):
+			return true
 	return sub_group != null and not sub_ids.is_empty() \
 		and subsystem_bounds().has_point(sub_group.get_global_transform().affine_inverse() * screen)
 
@@ -220,8 +226,9 @@ func bar_right() -> float:
 
 ## Frame-coordinate bounds of the solid art (alpha > 0.5) the subsystem group draws: the box (box_subsystems4.png
 ## solid x 6..163, y 6..33), each subsystem's symbol glyph (box location + 19..45) with its bars and manning icon
-## above (top bar − 24), and the buttons (solid x 6..33, from y 6, or 19 for button_battery3_base.png; 67 tall).
-func subsystem_bounds() -> Rect2:
+## above (top bar − 24), and the buttons (solid x 6..33, from y 6, or 19 for button_battery3_base.png; 67 tall)
+## except those in `skip` or drawn away from the group (`touch_rects` set: the phone column layout's doors buttons).
+func subsystem_bounds(skip: Array = []) -> Rect2:
 	var r := Rect2(HudLayout.SUBSYSTEM_BOX + Vector2(6, 6), Vector2(158 + 3 * sub_spacing, 28))
 	for id in sub_ids:
 		var col: SystemPowerColumn = columns.get(id)
@@ -230,7 +237,7 @@ func subsystem_bounds() -> Rect2:
 			continue
 		var top := col.loc.y + SystemPowerColumn.bar_y(sy, maxi(sy.get_level() - 1, 0)) - 24.0
 		r = r.merge(Rect2(col.loc.x + 19, top, 26, col.loc.y + 45 - top))
-		if buttons.has(id):
+		if buttons.has(id) and not skip.has(id) and (buttons[id] as SystemButton).touch_rects.is_empty():
 			var b: Control = buttons[id]
 			var inset := 19.0 if id == "battery" else 6.0
 			r = r.merge(Rect2(b.position + Vector2(6, inset), Vector2(28, 67)))
@@ -261,9 +268,9 @@ func _draw() -> void:
 	# without a drone system); the piece into the last box is the cap. A weapons box followed by the drones box
 	# draws the long wire_456 piece under the weapons panel. The first box's stub is part of wire_full.
 	var chain: Array = main_ids.duplicate()
-	if ship.sys("weapons") != null:
+	if ship.sys("weapons") != null and not wire_main_only:
 		chain.append("weapons")
-	if ship.sys("drones") != null and not drones_stacked:
+	if ship.sys("drones") != null and not drones_stacked and not wire_main_only:
 		chain.append("drones")
 	for k in chain.size() - 1:
 		var id: String = chain[k]

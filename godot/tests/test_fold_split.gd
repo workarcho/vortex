@@ -130,10 +130,31 @@ func _run() -> void:
 	await _player_ship()
 	await _intruder_msg()
 	await _rebuild_toggle()
+	await _no_enemy_corner()
 	print("\n%s" % ("test_fold_split: ALL OK" if fails == 0 else "%d FAILURES" % fails))
 	MAIN.input_mode = InputProfile.PC
 	MAIN._fold_layout_cli = ""
 	MAIN.hud_scale_override = 0.0
+
+
+## No enemy (TARGET window hidden): the crew stations buttons stay in the TARGET window's corner.
+func _no_enemy_corner() -> void:
+	print("No enemy: stations buttons stay")
+	var cl: CrewList = main.crew_list
+	var before: Array = cl.touch_station_rects.duplicate()
+	main.victory_shown = true
+	main.enemy_window.visible = false
+	main.enemy_space.visible = false
+	await get_tree().process_frame
+	await get_tree().process_frame
+	check("layout without the TARGET window", main._touch_enemy_present(), false)
+	check("stations buttons at the same place", cl.touch_station_rects, before)
+	main.victory_shown = false
+	main.enemy_window.visible = true
+	main.enemy_space.visible = true
+	await get_tree().process_frame
+	await get_tree().process_frame
+	check("enemy back: same place", cl.touch_station_rects, before)
 
 
 ## INTRUDERS DETECTED (CommandHud, PC frame (730, 210)) follows the player ship: centred over its rooms, clear of
@@ -334,6 +355,8 @@ func _pause_cancel() -> void:
 	var cr: Rect2 = tb.rect_of("cancel")
 	check("CANCEL right above PAUSE", [cr.position.x == pr.position.x, cr.end.y < pr.position.y], [true, true])
 	check("pair inside the layout's PAUSE rect", main._touch_pause_at.grow(1.0).encloses(pr.merge(cr)), true)
+	check("×1.5 the top group's scale (TOUCH_PAUSE_BASE)", pr.size.round(),
+		(TouchCombatButtons.BASE_SIZE * MAIN.TOUCH_PAUSE_BASE * main.TOUCH_TOPLEFT_SCALE).round())
 	var was: bool = main.combat.paused
 	tap(pr.get_center())
 	check("tap PAUSE toggles the pause", main.combat.paused, not was)

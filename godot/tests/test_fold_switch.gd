@@ -204,6 +204,7 @@ func _pause_tap() -> void:
 	main._touch_selection_tick()
 	var pr: Rect2 = tb.rect_of("pause")
 	check("PAUSE inside the layout's rect", main._touch_pause_at.grow(1.0).encloses(pr), true)
+	check("PAUSE ×1.5 the HUD scale (TOUCH_PAUSE_BASE)", tb.art_scale, main.command_hud.scale.x * MAIN.TOUCH_PAUSE_BASE)
 	tap(pr.get_center())
 	check("tap PAUSE: paused", main.combat.paused, true)
 	main.combat.paused = true

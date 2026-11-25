@@ -1507,18 +1507,19 @@ func _touch_selection_tick() -> void:
 		_end_select_pause()
 	touch_selecting = on
 	touch_buttons.visible = not modal and not single_view and command_hud.visible
-	touch_buttons.cancel_shown = on
+	touch_buttons.cancel_shown = on or calibrating  # HUD calibration: always shown, so its place can be judged
 	touch_buttons.paused = combat.paused
 	if touch_power != null:
 		touch_power.visible = touch_buttons.visible and (crew_list.touch_button_box != null
 			or not crew_list.touch_station_rects.is_empty())  # placed by _touch_layout
-	var t := command_hud.scale.x
-	# A pair rect taller than one base = the split layout's stacked pair (PAUSE at the bottom, CANCEL above).
+	var t := command_hud.scale.x * TOUCH_PAUSE_BASE  # the buttons' scale
+	# A pair rect taller than one base = a stacked pair (PAUSE at the bottom, CANCEL above).
 	touch_buttons.stacked = _touch_pause_at.size.y > TouchCombatButtons.BASE_SIZE.y * t + 1.0
+	touch_buttons.cancel_left = _touch_cancel_left  # phone column layout: PAUSE under the column, CANCEL left
 	if _touch_pause_at.has_area():  # _touch_layout found it a free spot: CANCEL is the pair's right base
 		touch_buttons.place(_touch_pause_at.end.x - TouchCombatButtons.BASE_SIZE.x * t, _touch_pause_at.end.y, t)
 	else:
-		touch_buttons.place(command_hud.position.x + HudLayout.FTL_BASE.x * t, _touch_height(), t)
+		touch_buttons.place(command_hud.position.x + HudLayout.FTL_BASE.x * command_hud.scale.x, _touch_height(), t)
 
 
 ## The selection mode ended: undo its auto-pause. A box / menu opened meanwhile takes the pause over (it unpauses
@@ -1570,7 +1571,7 @@ func _touch_buttons_input(mb: InputEventMouseButton) -> bool:
 	_gestures().tap_pending = false
 	if b == "pause":
 		touch_pause()
-	else:
+	elif not calibrating or touch_selecting:  # HUD calibration: CANCEL is always shown, for its place only
 		touch_cancel()
 	get_viewport().set_input_as_handled()
 	return true
@@ -2404,6 +2405,17 @@ const TOUCH_PAUSE_GAP := 2.0  # canvas px kept between PAUSE / CANCEL and any ot
 const TOUCH_STATION_SIZE := 60.0  # crew stations buttons in the TARGET corner: the 20×20 art ×3 (phone ≈ 31 dp)
 const TOUCH_STATION_GAP := 4.0
 const TOUCH_STATION_PAD := 6.0  # inside the TARGET frame art's bottom-right corner
+## Phone column layout (_touch_layout_band): the doors buttons and the crew stations buttons, each the 20×20 art
+## ×2.75 (a little under TOUCH_STATION_SIZE), doors right above the stations.
+const TOUCH_BAND_BUTTON := 55.0
+const TOUCH_SUB_BAR_GAP := 2.0  # canvas px between the systems bar's last box and the + / − toggle's solid art
+## Phone column layout: weapons / drones column scales tried (largest first) when neither `--hud-scale` nor the HUD
+## calibration fixes one: the column has the height above PAUSE to itself, so it may grow past ×1.5.
+const TOUCH_BAND_COLUMN_SCALES := [2.0, 1.875, 1.75, 1.625, 1.5, 1.25, 1.0]
+var _touch_cancel_left := false  # last layout: CANCEL left of PAUSE (TouchCombatButtons.cancel_left)
+## PAUSE / CANCEL (TouchCombatButtons) base size in every touch layout: 1.5 × the FTL drive button art, then × the
+## top group's scale (TOUCH_TOPLEFT_SCALE / the pan layouts' HUD scale: the CommandHud's scale).
+const TOUCH_PAUSE_BASE := 1.5
 var _touch_pause_at := Rect2()  # last layout: PAUSE + CANCEL pair (canvas / HUD layer coordinates)
 var _touch_sig := ""  # inputs of the last _touch_layout (see _touch_signature)
 var touch_ship_zoom := 1.0  # last layout: player ship scale
@@ -2624,6 +2636,10 @@ func _touch_layout() -> void:
 		print("touch layout: %s -> %s (HUD ×%.3f)" % [_touch_kind if _touch_kind != "" else "-", kind,
 			TOUCH_SYSBAR_SCALE])
 		_touch_kind = kind
+	_touch_door_reset()  # (the phone column layout moves the doors buttons out of their box)
+	_touch_cancel_left = false
+	systems_bar.wire_main_only = kind == "band"
+	crew_list.touch_message_top = INF
 	var want := _armament_vertical()
 	if weapon_panel.vertical != want[0] or (drone_panel != null and is_instance_valid(drone_panel)
 			and drone_panel.vertical != want[1]):
@@ -2673,95 +2689,153 @@ func _touch_layout() -> void:
 	if _touch_tall():
 		_touch_layout_tall(xf, stack, sub_b, sub_h, hud)
 		return
-	var col_widest := (target_left if _touch_enemy_present() else vis.x) - stack_w * (TOUCH_WEAPON_SCALES[0] as float)
+	_touch_layout_band(xf, stack, stack_h, stack_w, target_left, hud)
+
+
+## Phone column layout ("band": the phone and every canvas under TOUCH_TALL_MIN_H). Mobile rule: everything packed
+## as tightly as the art allows.
+## - Bottom row from the left: the systems bar ×TOUCH_SYSBAR_SCALE, the + / − toggle (solid art TOUCH_SUB_BAR_GAP
+##   right of the bar's last box), the subsystems (pilot, sensors, doors, battery; without the doors buttons) 2 px
+##   right of it, bottoms level, TOUCH_SUB_BOTTOM above the layout bottom.
+## - The weapons / drones column right-aligned against the TARGET art (no enemy: where it would be) from the top, as
+##   big as fits above PAUSE (_touch_band_column_scales, largest first; the HUD calibration's "weapons" or
+##   `--hud-scale` give the one scale).
+## - PAUSE on the layout bottom centred under the column (never past its right edge), CANCEL left of it; stacked
+##   (CANCEL above PAUSE) when CANCEL would meet the bottom row.
+## - The doors buttons (close all / open all) and the crew save / return stations buttons, all TOUCH_BAND_BUTTON
+##   square: doors right above the stations in the TARGET window's bottom-right corner (_touch_station_rects), the
+##   same place with no enemy (only the TARGET window is hidden: nothing else moves either).
+## - The player ship fitted in what is left (_touch_fit_ship; the column is a block, the rest are room obstacles; no
+##   enemy: up to the canvas edge, rooms clear of the corner buttons).
+func _touch_layout_band(xf: Transform2D, stack: Array, stack_h: float, stack_w: float, target_left: float,
+		hud: Array[Rect2]) -> void:
+	var vis := get_viewport().get_visible_rect().size
+	var h := _touch_height()
+	var k := TOUCH_SYSBAR_SCALE
+	var scales := _touch_band_column_scales()
+	var col_widest := target_left - stack_w * (scales[0] as float)
 	var hz := _touch_hazard(col_widest)
 	if hz.has_area():
 		hud.append(hz)  # the ship's rooms keep clear of the hazard status too
 	_touch_engines_warning(col_widest, hz)
-	# One layout attempt for a TARGET / column right edge `tl`: {fit, cs, col_top, pause}. `zmax` caps the ship
-	# scale, `inside` keeps the whole hull art on the canvas (no-enemy layout).
+	var sub_b := systems_bar.subsystem_bounds(["doors"]) if systems_bar.sub_group != null \
+		and not systems_bar.sub_ids.is_empty() else Rect2()
+	var sub_h := sub_b.size.y * k
+	var sub_w := sub_b.size.x * k
+	# Bottom row: bar, toggle, subsystems (fixed whatever the column does).
+	var row_sub := Vector2(_touch_bar_right() + TOUCH_SUB_BAR_GAP + 28.0 * k + TOUCH_CREW_BOX_GAP,
+		h - sub_h - TOUCH_SUB_BOTTOM).round()
+	var ps := TOUCH_TOPLEFT_SCALE * TOUCH_PAUSE_BASE  # PAUSE / CANCEL scale
+	var bs := TouchCombatButtons.BASE_SIZE * ps
+	var pgap := TouchCombatButtons.GAP * ps
+	# Subsystems at `sa` + the toggle left of them: the rects the rooms keep clear of.
+	var bottom_pieces := func(sa: Vector2) -> Array[Rect2]:
+		var out: Array[Rect2] = []
+		if sub_h <= 0:
+			return out
+		out.append(Rect2(sa, sub_b.size * k))
+		var ta := _touch_toggle_at(sa, sub_b)
+		out.append(Rect2(ta + Vector2(6, 6) * k, Vector2(28, CrewList.BOX_BODY_H - 6) * k))
+		return out
+	# No enemy: the ship may reach the canvas edge, its rooms clear of the corner buttons (doors + stations).
+	var enemy := _touch_enemy_present()
+	var ship_right := target_left if enemy else vis.x
+	var corner: Array[Rect2] = []
+	if not enemy:
+		corner.append(_touch_corner_block(xf, TOUCH_BAND_BUTTON, 2 if systems_bar.buttons.has("doors") else 1))
+	# One layout attempt: {fit, cs, col_top, pause, sub_at, row}, the column's right edge on the TARGET art. `zmax`
+	# caps the ship scale, `inside` keeps the whole hull art on the canvas (no-enemy layout). Per column scale (largest
+	# first): the bottom row with PAUSE + CANCEL side by side under the column, else stacked (CANCEL above PAUSE);
+	# when the row would reach the column (large HUD calibration values), the subsystems go under the column as
+	# before (toggle left of them, PAUSE / CANCEL in the first free spot: _touch_pause_rect).
 	var hull_mid_y := _touch_hull_pos().y + _touch_hull_rows().size() / 2.0  # world y of the hull image's middle
-	var attempt := func(tl: float, zmax: float, inside: bool) -> Dictionary:
-		var col_right := tl
+	var attempt := func(zmax: float, inside: bool) -> Dictionary:
+		var col_right := target_left
+		var tl := ship_right
+		var rp: Array[Rect2] = bottom_pieces.call(row_sub)
+		var row_right := 0.0
+		for r: Rect2 in rp:
+			row_right = maxf(row_right, r.end.x)
 		var cands := []
-		for c in TOUCH_WEAPON_SCALES:  # largest first
-			# Narrow canvases (fold inner): a column reaching left over the FTL / ship / menu buttons starts under them.
-			var top := TOUCH_COL_TOP if col_right - stack_w * c >= TOUCH_TOP_BUTTONS.end.x else TOUCH_TOP_BUTTONS.end.y
-			# Height: the stack at c, then TOUCH_DRONE_GAP·c and the subsystems at TOUCH_SYSBAR_SCALE (fixed).
-			var hfit := floorf((h - top - sub_h) / maxf(stack_h + (TOUCH_DRONE_GAP if sub_h > 0 else 0.0), 1.0)
-				/ TOUCH_ENEMY_STEP + 0.01) * TOUCH_ENEMY_STEP
-			var c2 := maxf(minf(1.0, c), minf(c, hfit))  # (a calibrated scale under 1 is kept)
-			var blocks: Array[Rect2] = []
-			for e in stack:
-				var at := Vector2(col_right - e[0].v_size.x * c2, top + e[1] * c2)
-				for b: Rect2 in e[0].v_blocks():
-					blocks.append(Rect2(at + b.position * c2, b.size * c2))
-			if sub_h > 0:
-				# Same place as below (pinned to the bottom unless the stack reaches lower).
-				var sa := Vector2(col_right - sub_b.size.x * TOUCH_SYSBAR_SCALE,
-					maxf(top + (stack_h + TOUCH_DRONE_GAP) * c2, h - sub_h - TOUCH_SUB_BOTTOM)).round()
-				blocks.append(Rect2(sa, Vector2(sub_b.size.x * TOUCH_SYSBAR_SCALE, sub_h)))
-				# Crew buttons box + the power toggle under it (solid art y 6 .. BELOW + 57); with the TARGET window
-				# up the buttons are in its corner and the toggle alone sits by the subsystems.
-				# The toggle alone sits by the subsystems; the big stations buttons are in the TARGET corner, or (no
-				# enemy) left of the toggle.
-				var ta := _touch_toggle_at(sa, sub_b)
-				blocks.append(Rect2(ta + Vector2(6, 6) * TOUCH_SYSBAR_SCALE,
-					Vector2(28, CrewList.BOX_BODY_H - 6) * TOUCH_SYSBAR_SCALE))
-				if not _touch_enemy_present():
-					var sr: Array = _touch_station_rects_by_toggle(ta)
-					blocks.append((sr[0] as Rect2).merge(sr[1]))
-			# PAUSE / CANCEL: a free spot clear of every HUD piece and block (rooms avoid it too).
-			var pr := _touch_pause_rect(hud, blocks, tl, h)
-			var hud2: Array[Rect2] = hud.duplicate()
-			hud2.append(pr)
-			var f2 := _touch_fit_ship(blocks, tl, h, hud2, zmax, inside)
-			if f2.is_empty():
+		for c in scales:  # largest first
+			var pick := {}
+			for mode in ["row", "row_stacked", "under"]:
+				# Narrow canvases (fold cover): a column reaching left over the FTL / ship / menu buttons starts under them.
+				var top := TOUCH_COL_TOP if col_right - stack_w * c >= TOUCH_TOP_BUTTONS.end.x else TOUCH_TOP_BUTTONS.end.y
+				var stacked: bool = mode == "row_stacked"
+				var under: bool = mode == "under"
+				# Height: the stack at c above PAUSE (stacked: CANCEL too), or above the subsystems ("under").
+				var below := TOUCH_DRONE_GAP + sub_h if under and sub_h > 0 else \
+					bs.y * (2 if stacked else 1) + (pgap if stacked else 0.0) + TOUCH_PAUSE_GAP
+				var hfit := floorf((h - top - below) / maxf(stack_h + (TOUCH_DRONE_GAP if under else 0.0), 1.0)
+					/ TOUCH_ENEMY_STEP + 0.01) * TOUCH_ENEMY_STEP
+				var c2 := maxf(minf(1.0, c), minf(c, hfit))  # (a calibrated scale under 1 is kept)
+				var cw := stack_w * c2
+				var blocks: Array[Rect2] = []
+				for e in stack:
+					var at := Vector2(col_right - e[0].v_size.x * c2, top + e[1] * c2)
+					for b: Rect2 in e[0].v_blocks():
+						blocks.append(Rect2(at + b.position * c2, b.size * c2))
+				var hud2: Array[Rect2] = hud.duplicate()
+				hud2.append_array(corner)
+				var sa := row_sub
+				var pr := Rect2()
+				if not under:
+					if sub_h > 0 and row_right + TOUCH_PAUSE_GAP > col_right - cw:
+						continue  # the row reaches the column
+					# PAUSE centred under the column, its right edge not past the column's (the TARGET art).
+					var px := roundf(minf(col_right - cw / 2 - bs.x / 2, col_right - TOUCH_PAUSE_GAP - bs.x))
+					var ph := bs.y * 2 + pgap if stacked else bs.y
+					pr = Rect2(px, h - ph, bs.x, ph) if stacked else Rect2(px - bs.x - pgap, h - bs.y, 2 * bs.x + pgap, bs.y)
+					if pr.position.x < row_right + TOUCH_PAUSE_GAP:
+						continue  # CANCEL (stacked: PAUSE) would meet the bottom row
+					hud2.append_array(rp)
+				else:
+					sa = Vector2(col_right - sub_w, maxf(top + (stack_h + TOUCH_DRONE_GAP) * c2,
+						h - sub_h - TOUCH_SUB_BOTTOM)).round()
+					blocks.append_array(bottom_pieces.call(sa))  # (the column's foot: the hull's nose stays left of it)
+					pr = _touch_pause_rect(hud + corner, blocks, col_right, h)
+				hud2.append(pr)
+				var f2 := _touch_fit_ship(blocks, tl, h, hud2, zmax, inside)
+				if f2.is_empty():
+					break
+				pick = {"fit": f2, "cs": c2, "col_top": top, "pause": pr, "sub_at": sa, "row": not under}
+				break
+			if pick.is_empty():
 				continue
-			var cand := {"fit": f2, "cs": c2, "col_top": top, "pause": pr}
-			if cands.is_empty() and top == TOUCH_COL_TOP:
-				return cand  # wide canvas (phone): the largest column whose ship fits (column first, then the ship)
-			cands.append(cand)
-		# Narrow canvas (open Fold): the largest column had to start under the top buttons, which pushes the nose
-		# (and the ship) down. Every column scale competes: the bigger ship, then the ship nearer the band's
-		# vertical centre, then the bigger column.
+			if cands.is_empty() and pick.col_top == TOUCH_COL_TOP:
+				return pick  # wide canvas (phone): the largest column whose ship fits (column first, then the ship)
+			cands.append(pick)
+		# Narrow canvas: the largest column had to start under the top buttons, which pushes the nose (and the
+		# ship) down. Every column scale competes: the bigger ship, then the ship nearer the band's vertical centre,
+		# then the bigger column.
 		var best := {}
 		var bz := 0.0
 		var bd := 0.0
 		for cd in cands:
 			var z: float = cd.fit.zoom
-			var d := absf(cd.fit.origin.y + hull_mid_y * z - h / 2)  # hull middle vs band middle			# cands are in falling column scale: equal ship and centring keep the bigger column.
+			var d := absf(cd.fit.origin.y + hull_mid_y * z - h / 2)  # hull middle vs band middle
+			# cands are in falling column scale: equal ship and centring keep the bigger column.
 			if best.is_empty() or z > bz + 0.001 or (absf(z - bz) <= 0.001 and d < bd - 0.5):
 				best = cd
 				bz = z
 				bd = d
 		return best
-	var res: Dictionary = attempt.call(target_left, INF, false)
-	if not _touch_enemy_present():
-		# No enemy: the column goes to the canvas edge; the ship stays wholly on the canvas and at most one
-		# TOUCH_SHIP_SCALES step above what it gets in combat (same ship, TARGET window shown).
-		var cap := INF
-		if not res.is_empty():
-			var i := TOUCH_SHIP_SCALES.find(res.fit.zoom)
-			cap = TOUCH_SHIP_SCALES[maxi(i - 1, 0)] if i >= 0 else res.fit.zoom
-			print("touch layout: no enemy; in combat the ship would be ×%.3f -> cap ×%.3f" % [res.fit.zoom, cap])
-		target_left = vis.x
-		res = attempt.call(target_left, cap, true)
+	# No enemy: the ship stays wholly on the canvas (`inside`).
+	var res: Dictionary = attempt.call(INF, not enemy)
 	var col_right := target_left
 	var fit: Dictionary = res.get("fit", {})
 	var cs: float = res.get("cs", 1.0)
 	var col_top: float = res.get("col_top", TOUCH_COL_TOP)
 	if res.has("pause"):
 		_touch_pause_at = res.pause
+	_touch_cancel_left = res.get("row", true)
 	var panel_at := []
 	for e in stack:
 		panel_at.append(Vector2(col_right - e[0].v_size.x * cs, col_top + e[1] * cs).round())
-	# Subsystems: always at the bottom (where they sit with a drones column too), within the right thumb's reach.
-	var sub_at := Vector2.ZERO
-	if sub_h > 0:
-		sub_at = Vector2(col_right - sub_b.size.x * TOUCH_SYSBAR_SCALE,
-			maxf(col_top + (stack_h + TOUCH_DRONE_GAP) * cs, h - sub_h - TOUCH_SUB_BOTTOM)).round()
-	_touch_apply(xf, stack, cs, panel_at, sub_b, sub_h, sub_at, fit)
+	print("touch layout (band): %s" % ("subsystems in the bottom row" if res.get("row", true)
+		else "subsystems under the column (the bottom row reaches the column)"))
+	_touch_apply(xf, stack, cs, panel_at, sub_b, sub_h, res.get("sub_at", row_sub), fit)
 
 
 ## Applies a touch layout: column panels (`stack` entries [panel, y] at canvas `panel_at`, scale `cs`), the
@@ -2792,15 +2866,21 @@ func _touch_apply(xf: Transform2D, stack: Array, cs: float, panel_at: Array, sub
 	_touch_top_left()
 	# Crew stations buttons (crew list local coordinates: the list is ×TOUCH_TOPLEFT_SCALE, shifted up): enlarged
 	# in the TARGET window's bottom-right corner while it is shown, else in the doors-style box by the subsystems.
+	# Phone column layout: TOUCH_BAND_BUTTON squares with the doors buttons right above them (_touch_layout_band).
 	crew_list.touch_button_box = null
 	var st := []
-	if _touch_enemy_present():
-		st = _touch_station_rects(xf)
-	elif sub_h > 0:
-		st = _touch_station_rects_by_toggle(_touch_toggle_at(sub_at, sub_b))
+	var band := _touch_kind == "band"
+	var doors := 2 if band and systems_bar.buttons.has("doors") else 1
+	# The TARGET window's corner with or without an enemy (no enemy: where it would be), so they never move.
+	st = _touch_station_rects(xf, TOUCH_BAND_BUTTON, doors) if band else _touch_station_rects(xf)
+	_touch_place_doors(st.slice(2, 4))
 	var local_st := []
+	var msg_top := INF  # the stations message goes above the doors buttons too
 	for r: Rect2 in st:
+		msg_top = minf(msg_top, (r.position.y - crew_list.position.y) / TOUCH_TOPLEFT_SCALE)
+	for r: Rect2 in st.slice(0, 2):
 		local_st.append(Rect2((r.position - crew_list.position) / TOUCH_TOPLEFT_SCALE, r.size / TOUCH_TOPLEFT_SCALE))
+	crew_list.touch_message_top = msg_top
 	crew_list.touch_station_rects = local_st
 	if sub_h > 0:
 		var cb := _touch_crew_box(sub_at, sub_b)
@@ -2848,8 +2928,8 @@ func _touch_engines_warning(col_left: float, hz: Rect2) -> void:
 ## (_touch_top_left, unchanged), top buttons + hazard status in the top row, the systems bar in the bottom-left
 ## corner (_touch_sysbar_dy), the TARGET window in the bottom-right corner (touch_enemy_transform, art bottom on the
 ## canvas bottom), the weapons / drones column(s) in the top-right corner above it (_touch_tall_column), the
-## subsystems on the canvas bottom with their right edge on the TARGET art (no enemy: on the canvas's right edge),
-## the crew box / power toggle / stations buttons left of them as on the phone, PAUSE / CANCEL by
+## subsystems on the canvas bottom with their right edge on the TARGET art (no enemy too), the power toggle left of
+## them, the crew stations buttons in the TARGET art's corner (no enemy: the same place), PAUSE / CANCEL by
 ## _touch_pause_rect (scanning up from the canvas bottom), and the player ship fitted in what is left
 ## (_touch_fit_ship; the TARGET art is one more block, so hull rows above it may reach the column).
 func _touch_layout_tall(xf: Transform2D, stack: Array, sub_b: Rect2, sub_h: float, hud: Array[Rect2]) -> void:
@@ -2861,6 +2941,9 @@ func _touch_layout_tall(xf: Transform2D, stack: Array, sub_b: Rect2, sub_h: floa
 		TOUCH_ENEMY_ART.size * xf.get_scale().x)
 	var sub_y := roundf(h - sub_h - TOUCH_SUB_BOTTOM)
 	var free_bottom := (sub_y if sub_h > 0 else h) - TOUCH_TALL_GAP  # column bottom limit without the TARGET window
+	# No enemy: the stations stay in the (hidden) TARGET window's corner; the column ends above them.
+	var corner := _touch_corner_block(xf)
+	free_bottom = minf(free_bottom, corner.position.y - TOUCH_TALL_GAP)
 	var col := _touch_tall_column(stack, art.position.y - TOUCH_TALL_GAP if enemy else free_bottom, vis.x)
 	var hz := _touch_hazard(col.left)
 	if hz.has_area():
@@ -2874,17 +2957,13 @@ func _touch_layout_tall(xf: Transform2D, stack: Array, sub_b: Rect2, sub_h: floa
 		var tl := art.position.x if with_target else vis.x
 		var blocks: Array[Rect2] = []
 		blocks.append_array(c2.blocks)
-		if with_target:
-			blocks.append(art)
+		blocks.append(art if with_target else corner)
 		var sa := Vector2.ZERO
 		if sub_h > 0:
-			sa = Vector2(roundf(tl - sub_b.size.x * k), sub_y)
+			sa = Vector2(roundf(art.position.x - sub_b.size.x * k), sub_y)
 			blocks.append(Rect2(sa, Vector2(sub_b.size.x * k, sub_h)))
 			var ta := _touch_toggle_at(sa, sub_b)
 			blocks.append(Rect2(ta + Vector2(6, 6) * k, Vector2(28, CrewList.BOX_BODY_H - 6) * k))
-			if not with_target:
-				var sr: Array = _touch_station_rects_by_toggle(ta)
-				blocks.append((sr[0] as Rect2).merge(sr[1]))
 		var pr := _touch_pause_rect(hud, blocks, tl, h)
 		var hud2: Array[Rect2] = hud.duplicate()
 		hud2.append(pr)
@@ -3049,7 +3128,7 @@ func _touch_split_alerts() -> Rect2:
 func _touch_split_pause(hud: Array[Rect2], blocks: Array[Rect2], h: float, fixed_x := NAN) -> Rect2:
 	var t := TOUCH_TOPLEFT_SCALE
 	var b := TouchCombatButtons.BASE_SIZE
-	var size := Vector2(b.x, 2 * b.y + TouchCombatButtons.GAP) * t  # stacked: PAUSE at the bottom, CANCEL above
+	var size := Vector2(b.x, 2 * b.y + TouchCombatButtons.GAP) * t * TOUCH_PAUSE_BASE  # stacked: PAUSE at the bottom
 	var vw := get_viewport().get_visible_rect().size.x
 	var pref := roundf(systems_bar.bar_right() * TOUCH_SYSBAR_SCALE + TOUCH_SPLIT_GAP)
 	var obst: Array[Rect2] = []
@@ -3253,8 +3332,8 @@ func _touch_layout_split(sub_b: Rect2, sub_h: float, hud: Array[Rect2]) -> void:
 		var aw: Vector2 = art0.size * s
 		var art := Rect2(Vector2(roundf(vis.x - aw.x), roundf(res.art_top)), aw)
 		var blocks: Array[Rect2] = sub_rects.duplicate()
-		if enemy:
-			blocks.append(art)
+		# No enemy: the (hidden) TARGET window's corner keeps the stations buttons.
+		blocks.append(art if enemy else _touch_corner_block(_touch_split_xf(art, s)))
 		var pa := {}
 		for p: Control in res.pa:
 			var at: Vector2 = (res.pa[p] as Vector2).round()
@@ -3302,7 +3381,7 @@ func _touch_layout_split(sub_b: Rect2, sub_h: float, hud: Array[Rect2]) -> void:
 	var s: float = best.s
 	var c: float = best.c
 	var art: Rect2 = best.art
-	var xf := Transform2D(0.0, Vector2(s, s), 0.0, art.position - art0.position * s - HudLayout.ENEMY_FRAME.position * s)
+	var xf := _touch_split_xf(art, s)
 	_place_touch_enemy(xf)
 	_touch_pause_at = best.pause  # (ENGINES CRITICAL: placed by _touch_split_alerts)
 	player_space.fixed_rotation = PI / 2
@@ -3348,6 +3427,12 @@ const TOUCH_SPLIT_FROZEN := {
 }
 
 
+## Split layout: the TARGET transform (frame -> canvas) whose frame art (TOUCH_ENEMY_ART) is at canvas `art`, ×`s`.
+func _touch_split_xf(art: Rect2, s: float) -> Transform2D:
+	return Transform2D(0.0, Vector2(s, s), 0.0, art.position - TOUCH_ENEMY_ART.position * s
+		- HudLayout.ENEMY_FRAME.position * s)
+
+
 func _touch_split_frozen() -> bool:
 	if not _touch_split() or absf(TOUCH_SYSBAR_SCALE - 1.5) > 0.01 or absf(TOUCH_TOPLEFT_SCALE - 1.5) > 0.01 \
 			or TOUCH_SPLIT_PANEL_SCALES.size() != 1 or absf(float(TOUCH_SPLIT_PANEL_SCALES[0]) - 1.5) > 0.01:
@@ -3375,9 +3460,11 @@ func _touch_split_frozen_layout(sub_b: Rect2, ks: float, hud: Array[Rect2], wp: 
 	blocks.append(Rect2(right + (sl[0] as Rect2).position, (sl[0] as Rect2).size))
 	blocks.append(Rect2(Vector2(vis.x, h) + (sl[1] as Rect2).position, (sl[1] as Rect2).size))
 	blocks.append(Rect2(right + (sl[2] as Rect2).position, (sl[2] as Rect2).size))
-	if _touch_enemy_present():
-		blocks.append(art)
-	var pr := Rect2(Vector2((f.pause as Rect2).position.x, h + (f.pause as Rect2).position.y), (f.pause as Rect2).size)
+	blocks.append(art if _touch_enemy_present() else _touch_corner_block(_touch_split_xf(art, s)))
+	# The approved slot was measured with ×1 buttons: TOUCH_PAUSE_BASE grows it from its bottom-left corner.
+	var fp: Rect2 = f.pause
+	var psz := (fp.size * TOUCH_PAUSE_BASE).round()
+	var pr := Rect2(Vector2(fp.position.x, h + fp.end.y - psz.y), psz)
 	var obst: Array[Rect2] = hud.duplicate()
 	obst.append(pr)
 	obst.append_array(blocks)
@@ -3470,6 +3557,71 @@ func _touch_fit_ship_rot(right_limit: float, h: float, obst: Array[Rect2]) -> Di
 	return {}
 
 
+## Phone column layout: the column scales to try, largest first — TOUCH_BAND_COLUMN_SCALES unless `--hud-scale`,
+## the fold option's HUD scale or the HUD calibration's "weapons" group fixes one (TOUCH_WEAPON_SCALES).
+func _touch_band_column_scales() -> Array:
+	if _hud_scale_set() or _hud_calibration().has("weapons"):
+		return TOUCH_WEAPON_SCALES
+	return TOUCH_BAND_COLUMN_SCALES
+
+
+## Canvas x of the systems bar's right end (×TOUCH_SYSBAR_SCALE about the frame's left edge): its last box
+## (64 px wide, 90 with a cooldown button; the reactor column's 90 at least), as _touch_hud_rects counts it.
+func _touch_bar_right() -> float:
+	var right := 90.0
+	for id in systems_bar.main_ids:
+		right = maxf(right, float(systems_bar.box_x[id]) + (90.0 if SystemsBar.WIDE_BOXES.has(id) else 64.0))
+	return right * TOUCH_SYSBAR_SCALE
+
+
+## The corner buttons' canvas block (_touch_station_rects merged): what the ship's rooms keep clear of when there is
+## no enemy (the TARGET window, which holds them, is hidden then).
+func _touch_corner_block(xf: Transform2D, b := TOUCH_STATION_SIZE, pairs := 1) -> Rect2:
+	var rs := _touch_station_rects(xf, b, pairs)
+	var r: Rect2 = rs[0]
+	for q: Rect2 in rs:
+		r = r.merge(q)
+	return r
+
+
+## Puts the doors buttons (SystemButton "doors", a child of the subsystems group) on the canvas rects `rects`
+## [close all, open all]: the button is moved and scaled (its art ×(rect / 20) on the canvas) and draws / hit-tests
+## its two buttons at `touch_rects` in its own coordinates. Not two rects: back in its DoorBox (_touch_door_reset).
+func _touch_place_doors(rects: Array) -> void:
+	var door: SystemButton = systems_bar.buttons.get("doors")
+	if door == null:
+		return
+	if rects.size() != 2:
+		_touch_door_reset()
+		return
+	var r0: Rect2 = rects[0]
+	var s := r0.size.x / 20.0  # canvas px per art px
+	# The group's transform in hud_root (= canvas) coordinates: the bar (scaled about its pivot), then sub_group.
+	var gxf := systems_bar.get_transform() * systems_bar.sub_group.get_transform()
+	var gs := gxf.get_scale().x
+	door.scale = Vector2(s / gs, s / gs)
+	door.position = gxf.affine_inverse() * r0.position
+	var local := []
+	for r: Rect2 in rects:
+		local.append(Rect2((r.position - r0.position) / s, Vector2(20, 20)))
+	door.touch_rects = local
+	var end := Vector2.ZERO
+	for r: Rect2 in local:
+		end = end.max(r.end)
+	door.size = end.max(door.custom_minimum_size)
+
+
+## The doors buttons back in their DoorBox place (every layout but the phone column).
+func _touch_door_reset() -> void:
+	var door: SystemButton = systems_bar.buttons.get("doors") if systems_bar != null else null
+	if door == null:
+		return
+	door.touch_rects = []
+	door.scale = Vector2.ONE
+	door.position = door.loc + Vector2(35, -36)  # SystemButton.setup's DoorBox offset
+	door.size = door.custom_minimum_size
+
+
 ## Canvas top-left of the crew buttons box image (button_door_base.png at TOUCH_SYSBAR_SCALE) for subsystems
 ## whose solid bounds `sub_b` (frame px) are drawn from canvas `sub_at`: its solid right edge TOUCH_CREW_BOX_GAP
 ## left of them, its top level with the doors button's (else with the subsystems' solid top).
@@ -3492,37 +3644,34 @@ func _touch_toggle_at(sub_at: Vector2, sub_b: Rect2) -> Vector2:
 ## side by side, TOUCH_STATION_PAD inside the frame art's bottom-right, TOUCH_STATION_GAP apart, when they clear
 ## the icons (last box location + 45 = its glyph's right edge); else stacked at the right edge above the icons
 ## and their power bars (8 px per level + 24). Canvas rects [save, return].
-func _touch_station_rects(xf: Transform2D) -> Array:
+## Phone column layout: `b` = TOUCH_BAND_BUTTON and `pairs` 2: the doors buttons right above them (one more row
+## side by side, else two more in the stack): [save, return, close doors, open doors].
+func _touch_station_rects(xf: Transform2D, b := TOUCH_STATION_SIZE, pairs := 1) -> Array:
 	var f := HudLayout.ENEMY_FRAME.position
-	var b := TOUCH_STATION_SIZE
 	var g := TOUCH_STATION_GAP
 	var art_br := xf * (f + TOUCH_ENEMY_ART.end)
 	var right := art_br.x - TOUCH_STATION_PAD
 	var bottom := art_br.y - TOUCH_STATION_PAD
-	var boxes: Array = enemy_window.system_boxes() if enemy_window != null else []
+	var boxes: Array = enemy_window.system_boxes() if enemy_window != null and _touch_enemy_present() else []
 	var icons_r := -INF
 	var lvl := 0
 	for e in boxes:
 		icons_r = maxf(icons_r, (xf * (e[1] as Vector2 + Vector2(45, 0))).x)
 		var sy := enemy_space.ship.sys(e[0])
 		lvl = maxi(lvl, sy.get_level() if sy else 0)
+	var out := []
 	if right - (2 * b + g) >= icons_r + g:
-		return [Rect2(right - 2 * b - g, bottom - b, b, b), Rect2(right - b, bottom - b, b, b)]
-	if right - b >= icons_r + g:
-		return [Rect2(right - b, bottom - 2 * b - g, b, b), Rect2(right - b, bottom - b, b, b)]
-	var icons_top := (xf * Vector2(0, HudLayout.ENEMY_SYSTEMS.y - HudLayout.POWER_PITCH * lvl - 24.0)).y - g
-	return [Rect2(right - b, icons_top - 2 * b - g, b, b), Rect2(right - b, icons_top - b, b, b)]
-
-
-## No enemy (no TARGET window): the big stations buttons side by side left of the + / − toggle whose image is at
-## `toggle_at` (canvas): their right edge TOUCH_STATION_GAP left of the toggle's solid art (x 6), their bottom
-## level with its solid bottom (art row BOX_BODY_H). Canvas rects [save, return].
-func _touch_station_rects_by_toggle(toggle_at: Vector2) -> Array:
-	var k := TOUCH_SYSBAR_SCALE
-	var b := TOUCH_STATION_SIZE
-	var right := toggle_at.x + 6 * k - TOUCH_STATION_GAP
-	var bottom := toggle_at.y + CrewList.BOX_BODY_H * k
-	return [Rect2(right - 2 * b - TOUCH_STATION_GAP, bottom - b, b, b), Rect2(right - b, bottom - b, b, b)]
+		for p in pairs:  # rows from the bottom up
+			var y := bottom - b - p * (b + g)
+			out.append_array([Rect2(right - 2 * b - g, y, b, b), Rect2(right - b, y, b, b)])
+		return out
+	if right - b < icons_r + g:
+		bottom = (xf * Vector2(0, HudLayout.ENEMY_SYSTEMS.y - HudLayout.POWER_PITCH * lvl - 24.0)).y - g
+	# One column at the right edge, pairs from the bottom up, each pair's first button above its second.
+	for p in pairs:
+		var y := bottom - (2 * p + 1) * b - 2 * p * g
+		out.append_array([Rect2(right - b, y - b - g, b, b), Rect2(right - b, y, b, b)])
+	return out
 
 
 ## Touch UI: the hazard status (HazardHud: DANGER! icon(s) + text, PC at (655..725 / 797, 72..145)) moved off the
@@ -3651,9 +3800,10 @@ func _touch_hud_rects(h: float) -> Array[Rect2]:
 ## top of another button: the toggle's hit box can't be covered.
 func _touch_pause_rect(hud: Array[Rect2], blocks: Array[Rect2], right_limit: float, h: float) -> Rect2:
 	var t := TOUCH_TOPLEFT_SCALE
-	var bs := TouchCombatButtons.BASE_SIZE * t
-	var size := Vector2(2 * bs.x + TouchCombatButtons.GAP * t, bs.y)
-	var pref := HudLayout.FTL_BASE.x * t - (TouchCombatButtons.BASE_SIZE.x + TouchCombatButtons.GAP) * t
+	var ps := t * TOUCH_PAUSE_BASE  # the buttons' scale
+	var bs := TouchCombatButtons.BASE_SIZE * ps
+	var size := Vector2(2 * bs.x + TouchCombatButtons.GAP * ps, bs.y)
+	var pref := HudLayout.FTL_BASE.x * t - (TouchCombatButtons.BASE_SIZE.x + TouchCombatButtons.GAP) * ps
 	var obst: Array[Rect2] = []
 	for r in hud + blocks:
 		obst.append(r.grow(TOUCH_PAUSE_GAP))
@@ -4690,7 +4840,8 @@ func _touch_layout_pan() -> void:
 	bar_right *= kbar
 	# PAUSE + CANCEL STACKED (TouchCombatButtons.stacked, set by _touch_selection_tick for a rect taller than one base):
 	# PAUSE at the bottom, CANCEL in the slot above it, same x.
-	var pair := Vector2(TouchCombatButtons.BASE_SIZE.x, TouchCombatButtons.BASE_SIZE.y * 2 + TouchCombatButtons.GAP) * k
+	var pair := Vector2(TouchCombatButtons.BASE_SIZE.x, TouchCombatButtons.BASE_SIZE.y * 2 + TouchCombatButtons.GAP) \
+		* k * TOUCH_PAUSE_BASE
 	# Weapons PC box on the bottom edge at k, PAN_HUD_GAP right of the systems bar (pushed left if it would leave the
 	# canvas); drones PC box above it, right edge on the canvas edge (PC's drones above-right of the weapons).
 	var wp: Control = weapon_panel if weapon_panel != null and weapon_panel.visible else null
@@ -5254,7 +5405,8 @@ func _touch_layout_phone_pan() -> void:
 	_pan_arrow_spots = {"y": arrow_y, "scale": arrow_sc, "x": arrow_x}
 	# PAUSE + CANCEL stacked, right-aligned in the strip, glued on the bottom row pieces under it (holders: on their
 	# solid top); the pause text centred above them, at kt (k, down to 1 when the strip under the subsystems is narrow).
-	var pair := Vector2(TouchCombatButtons.BASE_SIZE.x, TouchCombatButtons.BASE_SIZE.y * 2 + TouchCombatButtons.GAP) * k
+	var pair := Vector2(TouchCombatButtons.BASE_SIZE.x, TouchCombatButtons.BASE_SIZE.y * 2 + TouchCombatButtons.GAP) \
+		* k * TOUCH_PAUSE_BASE
 	var strip_l := strip_r - pair.x
 	var glue := h - g
 	for r in box_rects + st:

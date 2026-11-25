@@ -306,8 +306,11 @@ func _pan_layout() -> void:
 	check("  weapons right of the reactor", wp.position.x > (bar_xf * Vector2(HudLayout.REACTOR_X, 0)).x, true)
 	var tb: TouchCombatButtons = main.touch_buttons
 	check("PAUSE / CANCEL stacked", tb.stacked, true)
-	check("  pair on the canvas, right of the drones box", [screen.encloses(main._touch_pause_at),
-		main._touch_pause_at.position.x >= dh.end.x], [true, true])
+	# (×1.5 it reaches over the drones box's right end: glued on it, above its solid border.)
+	check("  pair on the canvas, not over the drones box", [screen.encloses(main._touch_pause_at),
+		main._touch_pause_at.end.x <= dh.end.x or main._touch_pause_at.end.y <= dh.position.y + 1.0], [true, true])
+	check("  ×1.5 the HUD scale (TOUCH_PAUSE_BASE)", absf(main._touch_pause_at.size.x
+		- TouchCombatButtons.BASE_SIZE.x * MAIN.TOUCH_PAUSE_BASE * main.command_hud.scale.x) <= 0.5, true)
 	var cl: CrewList = main.crew_list
 	check("two stations buttons", cl.touch_station_rects.size(), 2)
 	for i in cl.touch_station_rects.size():

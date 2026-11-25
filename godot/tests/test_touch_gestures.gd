@@ -486,11 +486,15 @@ func _run() -> void:
 	var tb: TouchCombatButtons = main.touch_buttons
 	check("PAUSE / CANCEL buttons exist and are shown", tb != null and tb.visible, true)
 	check("  idle: running, no selection mode, no CANCEL", state(), [false, false, false])
-	var jump_x: float = main.command_hud.position.x + HudLayout.FTL_BASE.x * main.command_hud.scale.x
-	check("  CANCEL at the JUMP button's x", tb.rect_of("cancel").position.x, roundf(jump_x))
-	check("  bottom edge on the layout bottom", tb.rect_of("cancel").end.y, main._touch_height())
-	check("  PAUSE left of CANCEL, same row", [tb.rect_of("pause").end.x < tb.rect_of("cancel").position.x,
-		tb.rect_of("pause").position.y], [true, tb.rect_of("cancel").position.y])
+	# Phone column layout: PAUSE on the layout bottom under the weapons column, CANCEL left of it (cancel_left).
+	var wp: WeaponPanel = main.weapon_panel
+	var col_r: float = wp.position.x + wp.v_size.x * wp.scale.x
+	check("  PAUSE under the weapons column (right edge not past it)", [tb.rect_of("pause").end.x <= col_r,
+		tb.rect_of("pause").get_center().x > wp.position.x], [true, true])
+	check("  bottom edge on the layout bottom", tb.rect_of("pause").end.y, main._touch_height())
+	check("  CANCEL left of PAUSE, same row", [tb.rect_of("cancel").end.x < tb.rect_of("pause").position.x,
+		tb.rect_of("cancel").position.y], [true, tb.rect_of("pause").position.y])
+	check("  ×1.5 the top group's scale", tb.art_scale, main.command_hud.scale.x * MAIN.TOUCH_PAUSE_BASE)
 	var target := free_room(me)
 	var floor_pt := empty_point(me, target)
 	var space_pt := space_point()

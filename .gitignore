@@ -24,3 +24,6 @@ tools/rdconst.py
 tools/font_dump.py
 tools/compose_cmp.gd
 pendientes.txt
+
+# Screenshots for the GitHub showcase (uploaded as release assets, not tracked)
+showcase/

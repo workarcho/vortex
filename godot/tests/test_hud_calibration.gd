@@ -92,6 +92,22 @@ func _sandbox() -> void:
 	check("touch input", MAIN.input_mode, InputProfile.TOUCH)
 	check("no run", [main.run == null, MAIN.run_mode], [true, false])
 	check("kept paused", main.combat.paused, true)
+	# CANCEL is always shown while calibrating (its place can be judged), and a tap on it does nothing.
+	main._touch_selection_tick()
+	var tb: TouchCombatButtons = main.touch_buttons
+	check("CANCEL shown without a selection mode", [tb != null and tb.cancel_shown, main.touch_selecting], [true, false])
+	if tb != null:
+		var cv := InputEventMouseButton.new()
+		cv.button_index = MOUSE_BUTTON_LEFT
+		cv.pressed = true
+		cv.position = tb.rect_of("cancel").get_center()
+		check("  tap CANCEL: taken by the button", main._touch_buttons_input(cv), true)
+		cv = cv.duplicate()
+		cv.pressed = false
+		main._touch_buttons_input(cv)
+		check("  … and nothing changed (still paused, no selection)", [main.combat.paused, main.touch_selecting],
+			[true, false])
+		check("  PAUSE and CANCEL apart", tb.rect_of("cancel").intersects(tb.rect_of("pause")), false)
 	var me: ShipState = main.player_space.ship
 	var en: ShipState = main.enemy_space.ship
 	check("player ship", me.blueprint.name, MAIN.CALIB_PLAYER_SHIP)
@@ -251,7 +267,9 @@ func _applied_outside() -> void:
 	await frames(3)
 	near("override: top", main.ship_status.scale.x, 1.3)
 	near("override: bottom", main.systems_bar.scale.x, 1.3)
-	near("override: weapons", main.weapon_panel.scale.x, 1.3)
+	# (Phone column layout: the column may be smaller when 1.3 does not fit above PAUSE ×1.5: the layout's scale.)
+	check("override: weapons (at most 1.3)", [main.weapon_panel.scale.x <= 1.3 + 0.001,
+		is_equal_approx(main.weapon_panel.scale.x, main.touch_weapon_scale)], [true, true])
 	MAIN.hud_scale_override = 0.0
 	await frames(3)
 	near("override gone: calibration again", main.systems_bar.scale.x, 1.4)

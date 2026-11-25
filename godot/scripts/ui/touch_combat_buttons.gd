@@ -30,6 +30,9 @@ var pressed_button := ""  # "pause" / "cancel" while a finger holds it
 ## Stacked placement (main.gd open-Fold "split" layout): PAUSE at `jump_x` with its bottom on `bottom`, CANCEL GAP
 ## above it, same x (instead of side by side).
 var stacked := false
+## Mirrored side-by-side placement (main.gd phone column layout: PAUSE under the weapons column): PAUSE's base at
+## `jump_x`, CANCEL GAP left of it.
+var cancel_left := false
 
 
 func _ready() -> void:
@@ -37,12 +40,16 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 
-## CANCEL's base left edge at `jump_x`, the bases' bottom on `bottom`, both at `s` (the CommandHud scale).
+## CANCEL's (`cancel_left`: PAUSE's) base left edge at `jump_x`, the bases' bottom on `bottom`, both at `s` (the CommandHud scale).
 func place(jump_x: float, bottom: float, s: float) -> void:
 	art_scale = s
 	if stacked:
 		pause_pos = Vector2(jump_x, bottom - BASE_SIZE.y * s).round()
 		cancel_pos = (pause_pos - Vector2(0, (BASE_SIZE.y + GAP) * s)).round()
+		return
+	if cancel_left:
+		pause_pos = Vector2(jump_x, bottom - BASE_SIZE.y * s).round()
+		cancel_pos = (pause_pos - Vector2((BASE_SIZE.x + GAP) * s, 0)).round()
 		return
 	cancel_pos = Vector2(jump_x, bottom - BASE_SIZE.y * s).round()
 	pause_pos = (cancel_pos - Vector2((BASE_SIZE.x + GAP) * s, 0)).round()

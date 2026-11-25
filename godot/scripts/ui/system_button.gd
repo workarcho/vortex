@@ -16,6 +16,10 @@ var _hover := -1  # hovered half (teleporter) or 0
 var warning := ""  # super-shield warning (shown briefly over the button)
 var warning_time := 0.0
 var _time := 0.0
+## Touch UI (main.gd phone column layout): the doors' two buttons drawn apart from their box, each its 20×20 art
+## (button_door_top / bottom, slots (10, 10) / (10, 33)) stretched (nearest) over a rect in this control's
+## coordinates: [close all (top), open all (bottom)]. These rects are the hit boxes too; empty = the PC DoorBox.
+var touch_rects: Array = []
 
 
 func setup(s: ShipState, system_id: String, c: Combat, box_loc: Vector2) -> void:
@@ -112,7 +116,7 @@ func tooltip_for(half: int) -> String:
 ## strict test as GenericButton::MouseMove), on PC and touch alike (a larger touch area kept turning systems on
 ## when the player meant to change their power).
 func _half_at(p: Vector2) -> int:
-	var rs := hit_rects(ship, kind)
+	var rs := touch_rects if not touch_rects.is_empty() else hit_rects(ship, kind)
 	for i in rs.size():
 		var r: Rect2 = rs[i]
 		if kind == "doors" and r.has_point(p) or SystemPowerColumn.strictly_inside(r, p):
@@ -189,6 +193,10 @@ func press(half := 0) -> bool:
 	if not ok and kind != "teleporter":
 		FtlData.play("powerUpFail")
 	return ok
+
+
+## The doors buttons' art rects in button_door_top / bottom_*.png (40 × 79): close all, open all.
+const DOOR_SLOTS := [Rect2(10, 10, 20, 20), Rect2(10, 33, 20, 20)]
 
 
 func _img(rel: String, at := Vector2.ZERO) -> bool:
@@ -280,8 +288,15 @@ func _draw() -> void:
 	var s := ship.sys(kind)
 	match kind:
 		"doors":  # DoorBox::OnRender: box, then the open (bottom) and close (top) buttons, active = DoorsFunction
-			_img("button_door_base.png")
 			var act := ship.doors_function()
+			if touch_rects.size() == 2:  # touch: the two buttons alone, enlarged (no box)
+				for half in 2:
+					var tex := HudDraw.tex("systemUI/button_door_%s_%s.png" % [["top", "bottom"][half],
+						_state(act, false, _hover == half)])
+					if tex:
+						draw_texture_rect_region(tex, touch_rects[half], DOOR_SLOTS[half])
+				return
+			_img("button_door_base.png")
 			_img("button_door_top_%s.png" % _state(act, false, _hover == 0))
 			_img("button_door_bottom_%s.png" % _state(act, false, _hover == 1))
 		"teleporter":  # TeleportBox: during the cooldown lock both buttons are simply inactive (_off)

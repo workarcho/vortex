@@ -42,6 +42,11 @@ var touch_station_rects: Array = []:
 			control.button_rects = v
 
 
+## Touch UI: local y the stations message ends above (INF = the stations buttons' top): the phone column layout
+## has the doors buttons above them (main.gd `_touch_apply`).
+var touch_message_top := INF
+
+
 func setup(ctrl: CrewControl) -> void:
 	control = ctrl
 	set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -107,7 +112,8 @@ func _draw() -> void:
 	if control.message_time > 0.0 and control.message != "":
 		if touch_station_rects.size() == 2:
 			# Touch UI: right-aligned just above the big stations buttons (TARGET corner / beside the toggle).
-			var top := minf(control.button_rect(0).position.y, control.button_rect(1).position.y)
+			var top := minf(minf(control.button_rect(0).position.y, control.button_rect(1).position.y),
+				touch_message_top)
 			var right := maxf(control.button_rect(0).end.x, control.button_rect(1).end.x)
 			HudDraw.text(self, 10, control.message, Vector2(right, top - FtlData.ftl_line_height(10) - 2),
 				Color.WHITE, 2)

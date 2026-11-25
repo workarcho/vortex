@@ -123,7 +123,7 @@ func _run() -> void:
 	en = main.enemy_space.ship
 	cc = main.crew_control
 	check("canvas", get_viewport().get_visible_rect().size, Vector2(CANVAS))
-	check("column ×1.5", main.touch_weapon_scale, 1.5)
+	check("column ×1.625 (the height above PAUSE: TOUCH_BAND_COLUMN_SCALES)", main.touch_weapon_scale, 1.625)
 	check("ship ×1.375", main.touch_ship_zoom, 1.375)
 	await _weapons()
 	await _drones()
@@ -131,9 +131,11 @@ func _run() -> void:
 	await _crew_hud()
 	await _power_mode()
 	await _pause_vs_toggle()
+	await _band_rows()
 	await _top_left()
 	await _enemy()
 	await _player_ship()
+	await _no_enemy_corner()
 	await _tall_canvas()
 	await _pc_unchanged()
 	print("\n%s" % ("test_touch_layout: ALL OK" if fails == 0 else "%d FAILURES" % fails))
@@ -141,7 +143,7 @@ func _run() -> void:
 
 
 func _weapons() -> void:
-	print("Weapons column (×1.5)")
+	print("Weapons column (×1.625)")
 	var wp: WeaponPanel = main.weapon_panel
 	var wc: WeaponControl = main.weapon_control
 	var b0: WeaponBox = wp.boxes[0]
@@ -249,13 +251,87 @@ func _systems() -> void:
 	check("_over_hud_panel on the drawn subsystem", main._over_hud_panel(pp), true)
 	check("subsystems box tooltip", (await tip_at(at(sb.sub_group, HudLayout.SUBSYSTEMS + Vector2(80, 64))))[0],
 		"subsystems")
-	var db: Control = sb.buttons["doors"]
+	# Doors buttons: moved out of their box into the TARGET corner (main._touch_place_doors), drawn = hit boxes.
+	var db: SystemButton = sb.buttons["doors"]
+	check("doors buttons drawn apart (touch_rects)", db.touch_rects.size(), 2)
 	me.manipulate_all_doors(false)
-	tap(at(db, Vector2(20, 43)))  # lower slot (10, 33, 20, 20): open all
-	check("doors button (lower half, drawn): doors open", me.env.doors.any(func(d): return d.open), true)
-	tap(at(db, Vector2(20, 20)))  # upper slot: close all
-	check("doors button (upper half): doors closed", me.env.doors.any(func(d): return d.open and not d.airlock),
+	tap(at(db, db.touch_rects[1].get_center()))  # open all (the right one)
+	check("doors button (open, drawn): doors open", me.env.doors.any(func(d): return d.open), true)
+	tap(at(db, db.touch_rects[0].get_center()))  # close all (the left one)
+	check("doors button (close, drawn): doors closed", me.env.doors.any(func(d): return d.open and not d.airlock),
 		false)
+	check("doors button tooltip at its drawn place", (await tip_at(at(db, db.touch_rects[0].get_center())))[0],
+		"button")
+	check("_over_hud_panel on a doors button", main._over_hud_panel(at(db, db.touch_rects[1].get_center())), true)
+	check("subsystems' bounds leave the moved doors buttons out",
+		sb.subsystem_bounds().is_equal_approx(sb.subsystem_bounds(["doors"])), true)
+
+
+## Phone column layout rows: the subsystems (+ / − toggle) in the bottom row right after the systems bar, PAUSE on
+## the bottom centred under the weapons / drones column, CANCEL left of it; nothing overlaps.
+func _band_rows() -> void:
+	print("Bottom row and PAUSE under the column")
+	var sb: SystemsBar = main.systems_bar
+	var k: float = main.TOUCH_SYSBAR_SCALE
+	var sub_b: Rect2 = sb.subsystem_bounds()
+	var sub := Rect2(at(sb.sub_group, sub_b.position), sub_b.size * k)
+	var tp: TouchPowerToggle = main.touch_power
+	var toggle := Rect2(at(tp, Vector2(6, 6)), Vector2(28, CrewList.BOX_BODY_H - 6) * k)
+	var bar_r: float = main._touch_bar_right()
+	check("toggle right after the bar's last box", [toggle.position.x > bar_r, toggle.position.x - bar_r <= 4.0],
+		[true, true])
+	check("subsystems right of the toggle, same row (bottoms level)", [sub.position.x > toggle.end.x,
+		absf(sub.end.y - toggle.end.y) <= 1.0], [true, true])
+	var wp: WeaponPanel = main.weapon_panel
+	var dp: Control = main.drone_panel
+	var col_l: float = wp.position.x
+	var col_r: float = wp.position.x + wp.v_size.x * wp.scale.x
+	var col_b: float = dp.position.y + dp.v_size.y * dp.scale.y
+	check("subsystems row left of the column", sub.end.x < col_l, true)
+	var tb: TouchCombatButtons = main.touch_buttons
+	var pz: Rect2 = tb.rect_of("pause")
+	check("PAUSE on the layout bottom, under the column", [pz.end.y, pz.position.y > col_b], [720.0, true])
+	check("PAUSE centred under the column (right edge not past it)", absf(pz.get_center().x - (col_l + col_r) / 2)
+		<= 1.0 or absf(pz.end.x - (col_r - main.TOUCH_PAUSE_GAP)) <= 1.0, true)
+	main.touch_buttons.cancel_shown = true
+	var cz: Rect2 = tb.rect_of("cancel")
+	check("CANCEL left of PAUSE, same row", [cz.end.x < pz.position.x, cz.position.y], [true, pz.position.y])
+	check("CANCEL clear of the subsystems and the toggle", [cz.intersects(sub), cz.intersects(toggle)], [false, false])
+	main._touch_selection_tick()
+
+
+## No enemy (TARGET window hidden): the corner buttons (doors + stations) stay where they are with an enemy.
+func _no_enemy_corner() -> void:
+	print("No enemy: corner buttons stay")
+	var cl: CrewList = main.crew_list
+	var db: SystemButton = main.systems_bar.buttons["doors"]
+	var before := [cl.touch_station_rects.duplicate(), at(db, db.touch_rects[0].position).round()]
+	main.victory_shown = true
+	main.enemy_window.visible = false
+	main.enemy_space.visible = false
+	await get_tree().process_frame
+	await get_tree().process_frame
+	check("layout without the TARGET window", main._touch_enemy_present(), false)
+	check("stations + doors buttons at the same place", [cl.touch_station_rects, at(db, db.touch_rects[0].position)
+		.round()], before)
+	var corner: Rect2 = main._touch_corner_block(main.touch_enemy_transform(), MAIN.TOUCH_BAND_BUTTON, 2)
+	check("  in the canvas's bottom-right corner", [corner.end.x > CANVAS.x - 20, corner.end.y > CANVAS.y - 20],
+		[true, true])
+	var sh := me
+	var rooms_clear := true
+	for r in sh.layout.rooms:
+		var rr: Rect2 = sh.room_rect(r.id)
+		var a: Vector2 = main.world_to_screen(sh, rr.position)
+		var b: Vector2 = main.world_to_screen(sh, rr.end)
+		if Rect2(a, b - a).abs().intersects(corner):
+			rooms_clear = false
+	check("  the ship's rooms clear of them", rooms_clear, true)
+	main.victory_shown = false
+	main.enemy_window.visible = true
+	main.enemy_space.visible = true
+	await get_tree().process_frame
+	await get_tree().process_frame
+	check("enemy back: same places", [cl.touch_station_rects, at(db, db.touch_rects[0].position).round()], before)
 
 
 func _crew_hud() -> void:
@@ -269,7 +345,7 @@ func _crew_hud() -> void:
 	check("_over_hud_panel on the drawn crew box", main._over_hud_panel(p), true)
 	# Stations buttons: enlarged in the TARGET window's bottom-right corner (main._touch_station_rects).
 	var xf: Transform2D = main.touch_enemy_transform()
-	var st: Array = main._touch_station_rects(xf)
+	var st: Array = main._touch_station_rects(xf, MAIN.TOUCH_BAND_BUTTON, 2)
 	check("stations buttons in the TARGET corner", [cl.touch_button_box, cl.touch_station_rects.size()], [null, 2])
 	var art_br: Vector2 = xf * (HudLayout.ENEMY_FRAME.position + main.TOUCH_ENEMY_ART.end)
 	var icons_r := -INF
@@ -277,7 +353,16 @@ func _crew_hud() -> void:
 		icons_r = maxf(icons_r, (xf * (e[1] + Vector2(45, 0))).x)
 	check("  inside the frame art's bottom-right, right of the enemy system icons", [st[1].end.x <= art_br.x,
 		st[1].end.y <= art_br.y, st[0].position.x > icons_r], [true, true, true])
-	check("  60 × 60 each (the 20 px art ×3)", [st[0].size, st[1].size], [Vector2(60, 60), Vector2(60, 60)])
+	check("  55 × 55 each (the 20 px art ×2.75: a little under the 60 of the other layouts)", [st[0].size,
+		st[1].size], [Vector2(55, 55), Vector2(55, 55)])
+	# The doors buttons right above them, the same size, drawn where their hit boxes are.
+	var db: SystemButton = main.systems_bar.buttons["doors"]
+	for k in 2:
+		var dr := Rect2(at(db, db.touch_rects[k].position), at(db, db.touch_rects[k].end) - at(db, db.touch_rects[k].position))
+		check("  doors button %d = rect %d above the stations (drawn, 55 × 55)" % [k, k + 2],
+			[dr.position.distance_to(st[k + 2].position) < 1.0, dr.size.round()], [true, st[k + 2].size])
+	check("  doors row right above the stations row (TOUCH_STATION_GAP)", st[0].position.y - st[2].end.y,
+		MAIN.TOUCH_STATION_GAP)
 	for k in 2:
 		check("  button %d drawn = hit box" % k, at(cl, cc.button_rect(k).position).distance_to(st[k].position) < 1.0,
 			true)
@@ -419,6 +504,8 @@ func _pause_vs_toggle() -> void:
 			others += 1
 	check("PAUSE / CANCEL clear of every HUD rect", others, 0)
 	check("PAUSE base inside the pair", pair.encloses(tb.rect_of("pause")), true)
+	check("PAUSE ×1.5 the top group's scale (TOUCH_PAUSE_BASE)", tb.rect_of("pause").size.round(),
+		(TouchCombatButtons.BASE_SIZE * MAIN.TOUCH_PAUSE_BASE * main.TOUCH_TOPLEFT_SCALE).round())
 	# Force PAUSE over the toggle's − half and tap it there.
 	tp.minus = false
 	var was_paused: bool = main.combat.paused
