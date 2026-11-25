@@ -277,7 +277,7 @@ func check_for_problems() -> void:
 			else:
 				desired.append(t)
 		var m := make_task(MAN, s.room, s.id)
-		if not ship.is_manned(s.id) and crew_on(m) == 0:
+		if not ship.is_manned(s.key) and crew_on(m) == 0:
 			desired.append(m)
 
 
@@ -416,9 +416,9 @@ func update_crew_member(c: CrewMember) -> void:
 	if c.is_drone():
 		return  # own crew drones: update_drones
 	# SetCurrentSystem: "home station" = system of the room the crew stands in while able to man.
-	var here := room_system_id(c.room)
-	if here != "" and c.stun <= 0.0:
-		c.manning_id = here
+	var here_sys := ship.system_in_room(c.room)
+	if here_sys != null and c.stun <= 0.0:
+		c.manning_id = here_sys.key  # the system's key (several artillery systems share the id)
 	if controllable(c):
 		_label_player_crew(c)
 		return

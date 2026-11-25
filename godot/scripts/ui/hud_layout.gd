@@ -139,6 +139,17 @@ const ENEMY_STATUS := Vector2(889, 90)  # box + (17, 45)
 const ENEMY_SYSTEMS := Vector2(912, 515)  # + 30·i
 const ENEMY_SYSTEM_STEP := 30
 const ENEMY_INFO := Vector2(1252, 80)  # right-aligned info texts, font 7 (box + (380, 35))
+## Boss visuals (CombatControl::boss_visual: AddEnemyShip with a CompleteShip whose IsBoss is true, or the BOSS_DEMO /
+## BOSS_SPECIAL blueprints): boxPosition (5, 7) -> box_hostiles_boss.png / _mask (523 × 598) at (752, 7)
+## (DrawHostileBox / GetHostileBoxSize); target = (261 − shipBox.w/2 + 5 + 3, 7 + 120), no vertical shift;
+## RenderShipStatus at box + (17, 45) − 5; info texts at box + (380 + 100, 35); UpdateSysBoxes at box + (80, 535)
+## (x − 45 with more than 12 systems).
+const ENEMY_FRAME_BOSS := Rect2(752, 7, 523, 598)
+const ENEMY_TARGET_X_BOSS := 261 + 5 + 3
+const ENEMY_TARGET_Y_BOSS := 7 + 120
+const ENEMY_STATUS_BOSS := Vector2(764, 47)  # box + (12, 40)
+const ENEMY_SYSTEMS_BOSS := Vector2(832, 542)  # box + (80, 535)
+const ENEMY_INFO_BOSS := Vector2(1232, 42)  # box + (480, 35)
 
 # ---------------------------------------------------------------- pause / warnings / tooltips
 const PAUSE_TEXT := Vector2(640, 558)  # Text_pause1/2.png 256×64 centred

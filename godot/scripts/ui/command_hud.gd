@@ -35,6 +35,12 @@ var intruder_warning := false
 ## Touch UI (main.gd `_touch_intruder_msg`): where the intruder warning's centre-top goes in this HUD's own
 ## coordinates (over the player ship as laid out); Vector2.INF = the PC place HudLayout.INTRUDER_MSG.
 var intruder_msg_at := Vector2.INF
+## ShipStatus / FTLButton bBossFight (a flagship stage at the beacon; main.gd sets it every frame): the intruder
+## warning is drawn 120 px further left (ShipStatus::OnRender translates by (−120, 0)) and the ENGINES CRITICAL
+## warning moves by (−85, −35) (FTLButton::OnRender), both clear of the larger boss TARGET box.
+var boss_fight := false
+const BOSS_INTRUDER_SHIFT := Vector2(-120, 0)
+const BOSS_ENGINES_SHIFT := Vector2(-85, -35)
 ## Touch UI pause overlay (set by main.gd `_touch_pause_tick`): `touch_pause` true = no "Press Spacebar" hint;
 ## `pause_title` / `pause_text` = FTL iPad text ids of the current selection mode (paused_targeting ...),
 ## "" = the plain PAUSED image.
@@ -175,7 +181,7 @@ func _draw() -> void:
 	danger_warning.draw(self)
 	if intruder_warning:
 		HudDraw.text(self, 52, HudDraw.txt("warning_intruders"), HudLayout.INTRUDER_MSG
-			if intruder_msg_at == Vector2.INF else intruder_msg_at,
+			+ (BOSS_INTRUDER_SHIFT if boss_fight else Vector2.ZERO) if intruder_msg_at == Vector2.INF else intruder_msg_at,
 			Color(HudLayout.RED_WARNING, HudDraw.flash_alpha(_t)), 1)
 	Hooks.emit(&"hud_draw.command", self, ship)
 
@@ -268,6 +274,8 @@ func _draw_ftl() -> void:
 	if _eng_warn_t >= 0.0:
 		var spec: Array = HudLayout.ENGINES_WARNING
 		if engines_warning_shift == Vector2.ZERO:
+			if boss_fight:  # FTLButton::OnRender, bBossFight: translated (−85, −35) (inside a 500 × 500 scissor)
+				spec = [spec[0] + BOSS_ENGINES_SHIFT, spec[1], spec[2]]
 			HudDraw.warning_with_lines(self, spec, HudDraw.txt("warning_engine"), _eng_warn_t)
 		else:  # touch UI, moved off the hazard status / column: the two text lines only (lines would point nowhere)
 			var o: Vector2 = spec[0] + spec[2] + engines_warning_shift

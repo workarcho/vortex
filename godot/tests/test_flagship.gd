@@ -36,6 +36,9 @@ func _run() -> void:
 	test_wait_animation()
 	test_super_drone_save()
 	test_credits()
+	test_artillery_systems()
+	test_jump_out_visuals()
+	test_boss_target_box()
 
 
 func new_run(seed: int, diff := EventEngine.Difficulty.NORMAL, ae := true) -> RunState:
@@ -427,3 +430,120 @@ func test_credits() -> void:
 	check("hint fades", is_equal_approx(m.skip_timer, 0.5), true)
 	c.free()
 	m.free()
+
+
+func test_artillery_systems() -> void:
+	print("Artillery: one ArtillerySystem per <artillery> entry (ShipManager::AddSystem / CreateSystems)")
+	var rooms := {1: [9, 10, 14, 18], 2: [9, 10, 14], 3: [9, 10]}
+	# ProcessShipBlueprint keeps one SystemTemplate per id: the last <artillery> entry's power wins for all copies.
+	var level := {1: 3, 2: 3, 3: 4}
+	for st in [1, 2, 3]:
+		var es := FlagshipRule.build(st, 1, true, FlagshipRule.stage_crew(1, [], 19))
+		var arts := es.systems_of("artillery")
+		check("stage %d: one system per artillery room" % st, arts.map(func(s): return s.room), rooms[st])
+		var keys := []
+		for i in arts.size():
+			keys.append(SystemState.key_for("artillery", i + 1))
+		check("  keys artillery, artillery#2 ...", arts.map(func(s): return s.key), keys)
+		var owner_rooms := es.artillery.map(func(w): return es.artillery_system(w).room)
+		check("  each weapon owned by the system in its room", owner_rooms, rooms[st])
+		check("  every copy at the last entry's power", arts.map(func(s): return s.get_level()),
+			arts.map(func(_s): return level[st]))
+		check("  all powered (enemy startup power)", arts.all(func(s): return s.power == level[st]), true)
+		check("  each in the system list (vSystemList, blueprint order, artillery last)",
+			es.system_list().slice(es.system_list().size() - arts.size()), keys)
+		var in_rooms: Array = rooms[st].map(func(r): return es.system_in_room(r).key)
+		check("  a room symbol in every artillery room (system_in_room)", in_rooms, keys)
+	var es := FlagshipRule.build(1, 1, true, FlagshipRule.stage_crew(1, [], 19))
+	var d := Damage.new()
+	d.damage = 1
+	es.apply_damage(18, d, rng)
+	check("a hit in room 18 damages only artillery#4", es.systems_of("artillery").map(func(s): return s.damage),
+		[0, 0, 0, 1])
+	ArtilleryRule.tick(es, 1.0)
+	check("  its weapon charges slower (power 2: x1.0), the others x0.75 (power 3)",
+		es.artillery.map(func(w): return w.cooldown_modifier), [0.75, 0.75, 0.75, 1.0])
+	es.sys("artillery#2").hacked = true
+	es.artillery[1].charge = 5.0
+	es.artillery[0].charge = 5.0
+	ArtilleryRule.tick(es, 16.0)
+	check("  a hacked artillery#2 drains only its own weapon", [es.artillery[0].charge > 5.0,
+		es.artillery[1].charge < 5.0], [true, true])
+	check("  WeaponArt hack level per system", [WeaponArt.hack_level(es, es.artillery[0]),
+		WeaponArt.hack_level(es, es.artillery[1])], [0, 2])
+	es.sys("artillery#2").hacked = false
+	var c: CrewMember = es.crew.filter(func(m): return m.room == 14)[0]
+	check("crew in room 14 man artillery#3, not the first artillery", [es.is_manned("artillery#3"),
+		es.system_in_room(14) == es.sys("artillery#3")], [true, true])
+	check("  the console of each artillery room (enemy: slot 0 facing up)", es.graph.console_dir(14), "up")
+	c.hp = 0.0
+	# Saved and loaded (mid-fight save, ShipSave): the four systems come back with their keys and rooms.
+	var snap := ShipSave.snapshot(es)
+	var es2 := FlagshipRule.build(1, 1, true, FlagshipRule.stage_crew(1, [], 19))
+	ShipSave.apply(es2, snap)
+	var loaded := es2.systems_of("artillery").map(func(s): return [s.key, s.room, s.damage])
+	check("save / load keeps the four systems", loaded, [["artillery", 9, 0], ["artillery#2", 10, 0], ["artillery#3", 14, 0], ["artillery#4", 18, 1]])
+	# The AI stand-down (DeactiveWeapons) depowers every artillery system.
+	var ai := ShipAI.new(es, rng)
+	ai._stand_down()
+	check("stand-down depowers all four", es.systems_of("artillery").map(func(s): return s.power), [0, 0, 0, 0])
+	# A ship with one artillery keeps the plain key.
+	var fed := ShipState.new("PLAYER_SHIP_FED", true)
+	check("FED cruiser: one artillery system, key 'artillery'", [fed.systems_of("artillery").size(),
+		fed.artillery[0].system_key, fed.artillery_system(fed.artillery[0]) == fed.sys("artillery")], [1, "artillery",
+		true])
+
+
+func test_jump_out_visuals() -> void:
+	print("Jump-out visuals (ExplosionAnimation / Ship::OnLoop GetFinalGib / Ship::OnRenderJump)")
+	for st in [1, 2]:
+		var es := FlagshipRule.build(st, 1, true, FlagshipRule.stage_crew(1, [], 19))
+		es.hull = 0
+		es.on_destroyed()
+		es.explosion.set_jump_out(FlagshipRule.invincible(es))  # LastStand.check_combat (SetDestroyed bossAnimation)
+		var ex: ShipExplosion = es.explosion
+		check("stage %d: jump-out, 4 s" % st, [ex.jump_out, ex.duration], [true, 4.0])
+		var fg := ex.final_gib()
+		check("  final gib = gib4 (the core that stays: velocity 0)", [fg.index, fg.vel], [4, Vector2.ZERO])
+		check("  its texture is boss_%d_gib4" % st, fg.tex != null and fg.tex == FtlData.first_texture(
+			["img/ship/boss_%d_gib4.png" % st, "img/ships_glow/boss_%d_gib4.png" % st]), true)
+		ex.time = 2.9
+		check("  before 0.75: no jump fade yet", ex.jump_out_progress(), -1.0)
+		ex.time = 3.5
+		check("  at 3.5 s: fade progress 0.5", is_equal_approx(ex.jump_out_progress(), 0.5), true)
+	var s3 := FlagshipRule.build(3, 1, true, FlagshipRule.stage_crew(1, [], 19))
+	s3.hull = 0
+	s3.on_destroyed()
+	s3.explosion.set_jump_out(FlagshipRule.invincible(s3))
+	check("stage 3: a real explosion, 6 s (boss_3), no jump fade", [s3.explosion.jump_out, s3.explosion.duration,
+		s3.explosion.jump_out_progress()], [false, 6.0, -1.0])
+
+
+func test_boss_target_box() -> void:
+	print("Boss TARGET box (CombatControl boss_visual) and the enemy system list (vSystemList order)")
+	var es := FlagshipRule.build(1, 1, true, FlagshipRule.stage_crew(1, [], 19))
+	check("flagship = boss visuals", EnemyWindow.is_boss_ship(es), true)
+	var w := EnemyWindow.new()
+	w.enemy = es
+	w.boss = true
+	check("boss frame (752, 7) 523 x 598", w.frame_rect(), Rect2(752, 7, 523, 598))
+	check("status block box + (12, 40), info box + (480, 35)", [w.status_origin(), w.info_origin()],
+		[Vector2(764, 47), Vector2(1232, 42)])
+	var boxes := w.system_boxes()
+	check("12 system boxes, blueprint order, four artillery boxes", boxes.map(func(e): return e[0]),
+		["pilot", "shields", "doors", "cloaking", "medbay", "engines", "oxygen", "hacking", "artillery",
+		"artillery#2", "artillery#3", "artillery#4"])
+	check("  from box + (80, 535), 30 px apart", [boxes[0][1], boxes[11][1]], [Vector2(832, 542), Vector2(1162, 542)])
+	var n := ShipState.new("REBEL_SKINNY_ELITE", false)
+	w.enemy = n
+	w.boss = false
+	check("normal ship: frame and boxes as before", [w.frame_rect(), w.system_boxes()[0][1]],
+		[Rect2(872, 45, 410, 555), Vector2(912, 515)])
+	check("  in blueprint order (vanilla Elite Fighter: O2, pilot, shields, engines, weapons, medbay)",
+		w.system_boxes().map(func(e): return e[0]), ["oxygen", "pilot", "shields", "engines", "weapons", "medbay"])
+	check("not a boss", EnemyWindow.is_boss_ship(n), false)
+	w.free()
+	var hud := CommandHud.new()
+	check("boss fight: intruder warning 120 px left, engines warning (-85, -35)", [CommandHud.BOSS_INTRUDER_SHIFT,
+		CommandHud.BOSS_ENGINES_SHIFT], [Vector2(-120, 0), Vector2(-85, -35)])
+	hud.free()

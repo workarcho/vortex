@@ -289,7 +289,7 @@ static func lock_timer_steps(t: float) -> int:
 static func manning_icon(sh: ShipState, s: SystemState) -> Array:
 	if sh == null or not sh.is_boostable(s.id) or blocked_boosted(sh, s):
 		return []
-	var lvl := sh.crew_level_in(s.id)
+	var lvl := sh.crew_level_in(s.key)
 	if ShipState.LEVEL_BOOSTABLE.has(s.id):
 		return ["manning_bar_on" if lvl > 0 else "manning_bar_off", Vector2(24, -9), 8]
 	match lvl:

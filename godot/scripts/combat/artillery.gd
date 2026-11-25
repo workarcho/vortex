@@ -24,9 +24,10 @@ static func charge_time(w: WeaponState, power: int) -> float:
 static func tick(ship: ShipState, f: float) -> void:
 	if ship.artillery.is_empty():
 		return
-	var a := ship.sys("artillery")
-	var p := a.effective_power() if a else 0
 	for w in ship.artillery:
+		# Each ArtillerySystem drives its own ProjectileFactory (the flagship has one system per artillery room).
+		var a := ship.artillery_system(w)
+		var p := a.effective_power() if a else 0
 		w.powered = p > 0
 		w.set_cooldown_modifier(cooldown_modifier(p))
 		if a and a.hacked:

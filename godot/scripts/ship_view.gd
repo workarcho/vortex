@@ -234,7 +234,7 @@ func _anims_for(race: String) -> Dictionary:
 ## idle, and the system is boostable and intact (manning bonus > 0). In and out of combat alike (rules/crew.md).
 static func is_typing(sh: ShipState, c: CrewMember) -> bool:
 	var s := sh.system_in_room(c.room)
-	return s != null and sh.active_manning_crew(s.id) == c and sh.crew_level_in(s.id) > 0
+	return s != null and sh.active_manning_crew(s.key) == c and sh.crew_level_in(s.key) > 0
 
 
 ## Frame of an animation at the current time (or `index` if >= 0).
@@ -1089,9 +1089,15 @@ func _draw_explosion() -> void:
 	if hull_tex and (ex == null or not ex.final_boom):
 		draw_texture(hull_tex, hull_pos)
 	if ex != null and ex.jump_out_progress() >= 0.0 and hull_tex:
-		# Ship::OnRenderExplosion -> OnRenderJump((progress - 0.75) x 4): hull at alpha 1 - p plus the jump glare.
+		# Ship::OnRenderExplosion -> OnRenderJump((progress - 0.75) x 4): the ship image at alpha 1 - p plus the jump
+		# glare. Ship::OnLoop swapped that image for ExplosionAnimation::GetFinalGib (the last gib, where it is now)
+		# the frame progress passed 0.75, so what fades out is the surviving core (boss_1_gib4 = the stage-2 hull
+		# shape), not the intact stage-1 hull; the broken-off gibs keep drifting.
 		var jp := ex.jump_out_progress()
-		draw_texture(hull_tex, hull_pos, Color(1, 1, 1, 1.0 - jp))
+		var fg := ex.final_gib()
+		var fg_tex: Texture2D = fg.get("tex") if not fg.is_empty() else null
+		if fg_tex:
+			draw_texture(fg_tex, hull_pos + Vector2(fg.pos).floor(), Color(1, 1, 1, 1.0 - jp))
 		var jg := jump_glare(jp, hull_tex.get_width(), hull_tex.get_height(), ship.is_player)
 		var glare := FtlData.texture("img/effects/glowing_star.png")
 		if glare and float(jg[2]) > 0.0:
@@ -1154,16 +1160,15 @@ func _draw_rotated(tex: Texture2D, at: Vector2, src: Rect2, angle: float, col :=
 func _computer_level(s: SystemState) -> int:
 	if not ShipState.BOOSTABLE.has(s.id):
 		return -1
-	return ship.crew_level_in(s.id)
+	return ship.crew_level_in(s.key)
 
 
 ## Step 6 (§4): per system whose room is seen — player interior image (α 0.75) + manned console glow,
 ## teleporter pads, clonebay tube, cloaking glow; enemy computer console + glow; hacked console sparks.
 func _draw_interiors() -> void:
-	for b in ship.blueprint.systems:
-		if not b.start or not ship.systems.has(b.id):
-			continue
-		var s: SystemState = ship.systems[b.id]
+	for k in ship.system_list():  # vSystemList: one entry per system (each flagship artillery in its own room)
+		var s: SystemState = ship.systems[k]
+		var b := ship.system_by_id(k)
 		if _blk.has(s.room):
 			continue
 		var rect := ship.room_rect(s.room)
@@ -1226,7 +1231,7 @@ func console_art(s: SystemState) -> Dictionary:
 		return {"kind": "", "slot": -1, "dir": ""}
 	if not ship.player_art():
 		return {"kind": "computer", "slot": slot, "dir": ship.graph.console_dir(s.room)}
-	var img := interior_image(s.id, ship.system_by_id(s.id))
+	var img := interior_image(s.id, ship.system_by_id(s.key))
 	var lay := FtlData.room_layout(img) if img != "" else {}
 	var glow := FtlData.texture("img/ship/interior/%s1.png" % lay.name) if not lay.is_empty() else null
 	if glow == null or FtlData.texture("img/ship/interior/" + img + ".png") == null:

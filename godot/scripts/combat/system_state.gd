@@ -11,6 +11,9 @@ const ORDER := ["shields", "engines", "oxygen", "weapons", "drones", "medbay", "
 	"doors", "teleporter", "cloaking", "artillery", "battery", "clonebay", "mind", "hacking"]
 
 var id := ""
+## Key in ShipState.systems: the id, or "<id>#<n>" for the n-th system of a repeated id (the flagship's artillery,
+## one ArtillerySystem per <artillery> entry, each in its own room). Pass it (not `id`) to ShipState lookups.
+var key := ""
 var room := -1
 var level := 0  # purchased bars
 var damage := 0  # broken bars
@@ -63,8 +66,14 @@ var last_bonus_power := 0
 
 func _init(sys_id: String, room_id: int, lvl: int) -> void:
 	id = sys_id
+	key = sys_id
 	room = room_id
 	level = lvl
+
+
+## ShipState.systems key of the n-th (1-based) system of an id in blueprint order.
+static func key_for(sys_id: String, n: int) -> String:
+	return sys_id if n <= 1 else "%s#%d" % [sys_id, n]
 
 
 ## ShipSystem::DamageOverTime(amount): progress += amount; at 100 it resets and true is returned (the caller breaks

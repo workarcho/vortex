@@ -267,7 +267,7 @@ func sun_damage(ship: ShipState) -> Dictionary:
 		if int(rng.randi() % 100) < 33 * int(per_room[room]):
 			var s := ship.system_in_room(room)
 			if s:
-				ship.damage_system(s.id, 1)
+				ship.damage_system(s.key, 1)
 			ship.take_hull_damage(1)
 			messages.append([ship, "hull", 1, room])  # DamageMessage "1" at the room centre
 			hits += 1

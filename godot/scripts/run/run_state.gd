@@ -1585,13 +1585,13 @@ static func apply_status_to(s_ship: ShipState, st: Dictionary) -> void:
 	var lv := s.get_level()
 	match String(st.type):
 		"limit":
-			s_ship.set_power_loss(s.id, maxi(lv - int(st.amount), 0))
+			s_ship.set_power_loss(s.key, maxi(lv - int(st.amount), 0))
 		"loss":
-			s_ship.set_power_loss(s.id, mini(int(st.amount), lv))
+			s_ship.set_power_loss(s.key, mini(int(st.amount), lv))
 		"divide":
-			s_ship.set_power_loss(s.id, lv - lv / maxi(int(st.amount), 1))
+			s_ship.set_power_loss(s.key, lv - lv / maxi(int(st.amount), 1))
 		"clear":
-			s_ship.set_power_loss(s.id, 0)
+			s_ship.set_power_loss(s.key, 0)
 
 
 # ------------------------------------------------------------------ event ship and combat outcome (§5)

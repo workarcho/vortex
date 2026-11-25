@@ -969,6 +969,8 @@ func _weapons_line(ship: ShipState) -> String:
 		var w := ship.weapons[i]
 		parts.append("%d:%s(%d)%s" % [i + 1, w.bp.name, w.power_cost(), "ON" if w.powered else "off"])
 	var s := ship.sys("weapons")
+	if s == null:  # no weapons system (the flagship: artillery only)
+		return "[no weapons system] reactor free %d" % ship.reactor_free()
 	return "[%s] cap %d/%d ion %d reactor free %d" % [", ".join(parts), ship.weapons_power_used(),
 		s.max_power(), s.ion, ship.reactor_free()]
 
@@ -1962,6 +1964,8 @@ func _process(delta: float) -> void:
 	enemy_space.show_power = me.sensors_provide(3) and not enemy_space.ship.is_cloaked()
 	enemy_window.show_power = enemy_space.show_power
 	enemy_window.touch = _touch()  # escape message inside the TARGET frame in the touch layout
+	# CommandGui::AddEnemyShip (IsBoss) -> ShipStatus / FTLButton bBossFight, cleared by ClearLocation.
+	command_hud.boss_fight = has_enemy and not victory_shown and EnemyWindow.is_boss_ship(enemy_space.ship)
 	# hackLoop: while the player's own pulse runs or any of its systems is under a pulse. Like every sound loop it is
 	# silent while the game is paused (CApp::OnLoop -> SoundControl::OnLoop(IsPaused) -> PauseLoops; rules/pause.md).
 	FtlData.set_loop("hackLoop", (HackingRule.pulsing(me) or HackingRule.any_hacked(me)) and not combat.paused)
@@ -2192,6 +2196,10 @@ func _show_enemy(e: bool) -> void:
 
 ## Enemy ship view: the opaque interior of box_hostiles2.png (the frame is drawn under it).
 const ENEMY_VIEW := Rect2(882, 54, 380, 529)
+## Boss visuals (PC): the opaque interior of box_hostiles_boss.png at (752, 7) (x 4..519, y 4..594); the stencil
+## box_hostiles_boss_mask.png (opaque x 8..515, y 24..590) clips the ship inside it.
+const ENEMY_VIEW_BOSS := Rect2(756, 11, 515, 590)
+const ENEMY_MASK_BOSS := "img/combatUI/box_hostiles_boss_mask.png"
 ## Stencil of the enemy view (CombatControl::DrawHostileBox), drawn at HudLayout.ENEMY_FRAME.position: opaque
 ## frame px x 14..389, y 29..532 (screen 886..1261 × 74..577) with cut corners — narrower than ENEMY_VIEW.
 const ENEMY_MASK := "img/combatUI/box_hostiles_mask.png"
@@ -2213,11 +2221,22 @@ func player_origin() -> Vector2:
 
 ## Screen point of the enemy ship's world origin (CombatControl::AddEnemyShip: origin (747, 0) + target
 ## (308 − shipBox.w / 2 + 20, 45 + vertical_shift + 85); shipBox = the rooms' box).
+## Boss visuals (CombatControl::boss_visual, `_enemy_boss_visual`): target (261 − shipBox.w / 2 + 5 + 3, 7 + 120),
+## without the vertical shift.
 func enemy_origin() -> Vector2:
 	var e := enemy_space.ship
 	var b := e.rooms_bounds()
+	if _enemy_boss_visual():
+		return HudLayout.COMBAT_ORIGIN + Vector2(HudLayout.ENEMY_TARGET_X_BOSS - b.size.x / 2 - b.position.x,
+			HudLayout.ENEMY_TARGET_Y_BOSS)
 	return HudLayout.COMBAT_ORIGIN + Vector2(HudLayout.ENEMY_TARGET_X - b.size.x / 2 - b.position.x,
 		HudLayout.ENEMY_TARGET_Y + e.layout.get("vertical", 0))
+
+
+## CombatControl::boss_visual: the flagship gets the large boss TARGET box (PC layout only; the touch layouts keep
+## the normal box, which their scaling and packing are built around).
+func _enemy_boss_visual() -> bool:
+	return enemy_space != null and enemy_space.ship != null and not single_view 		and input_mode != InputProfile.TOUCH and EnemyWindow.is_boss_ship(enemy_space.ship)
 
 
 # ------------------------------------------------------------------ touch UI: enlarged TARGET window
@@ -3983,6 +4002,10 @@ func _apply_view() -> void:
 	enemy_window.visible = not single_view and enemy_shown
 	enemy_window_back.visible = not single_view and enemy_shown
 	enemy_space.legacy_hud = single_view
+	var boss := _enemy_boss_visual()
+	for w in [enemy_window, enemy_window_back]:
+		if w != null:
+			w.boss = boss
 	if not single_view:  # FTL layout
 		player_space.visible = true
 		enemy_space.visible = enemy_shown
@@ -3990,14 +4013,16 @@ func _apply_view() -> void:
 		player_space.size = HudLayout.FRAME
 		player_space.set_fixed_origin(player_origin())
 		# Vanilla stencil: the enemy ship (bubble included) only shows inside box_hostiles_mask.png (Space.CLIP_SHADER).
-		enemy_space.set_clip_mask(FtlData.texture(ENEMY_MASK),
-			Rect2(ENEMY_VIEW.position - HudLayout.ENEMY_FRAME.position, ENEMY_VIEW.size))
+		var view := ENEMY_VIEW_BOSS if boss else ENEMY_VIEW
+		var frame := HudLayout.ENEMY_FRAME_BOSS if boss else HudLayout.ENEMY_FRAME
+		enemy_space.set_clip_mask(FtlData.texture(ENEMY_MASK_BOSS if boss else ENEMY_MASK),
+			Rect2(view.position - frame.position, view.size))
 		if input_mode == InputProfile.TOUCH:
 			_touch_layout()
 			return
-		enemy_space.position = ENEMY_VIEW.position
-		enemy_space.size = ENEMY_VIEW.size
-		enemy_space.set_fixed_origin(enemy_origin() - ENEMY_VIEW.position)
+		enemy_space.position = view.position
+		enemy_space.size = view.size
+		enemy_space.set_fixed_origin(enemy_origin() - view.position)
 		return
 	player_space.visible = not showing_enemy or not enemy_shown
 	enemy_space.visible = showing_enemy and enemy_shown

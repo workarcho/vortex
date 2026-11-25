@@ -39,6 +39,7 @@ var beam_level := -1.0  # beam being swept: fraction done (WeaponAnimation::SetF
 # Artillery (rules/artillery.md): the system's own ProjectileFactory; its charge time is scaled by
 # cooldown_modifier = 1.5 - 0.25 x artillery power (SetCooldownModifier keeps the charge fraction).
 var is_artillery := false
+var system_key := "artillery"  # artillery: the key of the ArtillerySystem that owns it (ShipState.artillery_system)
 var cooldown_modifier := 1.0
 
 

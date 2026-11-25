@@ -30,8 +30,8 @@ var anims: Array = []
 var rng := RandomNumberGenerator.new()
 var sounds := true
 ## Flagship jump-out (ExplosionAnimation::SetJumpOut, rules/flagship.md): 4.0 s; at progress 0.75 the `jumpLeave`
-## sound, the hull image fades back in over the gibs with the jump glare (Ship::OnRenderJump with
-## (progress − 0.75) × 4) and the last gib is no longer drawn.
+## sound, the last gib stops being drawn as a gib and becomes the ship image instead (Ship::OnLoop ->
+## GetFinalGib), which Ship::OnRenderJump fades out with the jump glare ((progress − 0.75) × 4).
 const JUMP_OUT_TIME := 4.0
 const JUMP_OUT_FROM := 0.75
 var jump_out := false
@@ -41,6 +41,12 @@ func set_jump_out(on: bool) -> void:
 	jump_out = on
 	if on:
 		duration = JUMP_OUT_TIME
+
+
+## ExplosionAnimation::GetFinalGib: the last gib (its texture and current position, relative to the hull image).
+## Ship::OnLoop makes it the ship image once a jump-out passes 0.75, so OnRenderJump fades it out (not the hull).
+func final_gib() -> Dictionary:
+	return gibs[gibs.size() - 1] if not gibs.is_empty() else {}
 
 
 ## Jump progress 0..1 of the jump-out glare (-1 = none yet).

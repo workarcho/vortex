@@ -218,13 +218,9 @@ func check_power_levels() -> void:
 	_apply_plan()
 
 
-## Systems in blueprint order (ShipManager system list).
+## System keys in blueprint order (ShipManager system list; one per artillery system).
 func _system_list() -> Array:
-	var out := []
-	for b in ship.blueprint.get("systems", []):
-		if b.start and ship.sys(b.id) != null and not out.has(b.id):
-			out.append(b.id)
-	return out
+	return ship.system_list()
 
 
 ## Locked (ion) or hacked systems refuse power changes.
@@ -440,10 +436,10 @@ func _stand_down() -> void:
 			ship._set_weapon_powered(w, false)
 	for d in ship.drones:
 		DroneSystemRule.depower_drone(ship, d)
-	var a := ship.sys("artillery")
-	if a and not _frozen(a):
-		ship._set_power(a, 0)
-		a.user_power = 0
+	for a in ship.systems_of("artillery"):  # every ArtillerySystem (the flagship has several)
+		if not _frozen(a):
+			ship._set_power(a, 0)
+			a.user_power = 0
 	var tp := ship.sys("teleporter")
 	if tp:
 		ship.force_unlock(tp)  # TeleportSystem::ForceReady: LockSystem(0)

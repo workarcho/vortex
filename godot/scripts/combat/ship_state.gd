@@ -163,10 +163,19 @@ func _init(bp_name: String, player: bool) -> void:
 	mounts = FtlData.weapon_mounts(blueprint.layout)
 	reactor_max = blueprint.max_power
 
+	# BlueprintManager::ProcessShipBlueprint keeps ONE SystemTemplate per system id: a repeated entry (the
+	# flagship's four <artillery>) appends its room and weapon to the template and overwrites its power, so every
+	# copy starts at the power of the LAST entry of that id. CreateSystems then calls AddSystem once per entry, in
+	# blueprint order (vSystemList); the n-th artillery system takes the n-th room / weapon (rules/artillery.md).
+	var shared_power := {}
 	for s in blueprint.systems:
-		if s.start:
-			# ShipManager::AddSystem 0x0049ca00: max(power, 1) bars (AUTO_ASSAULT <weapons power="0"> -> 1 bar).
-			systems[s.id] = SystemState.new(s.id, s.room, ShipGenerator.start_level(s.id, int(s.power)))
+		shared_power[s.id] = int(s.power)
+	for e in _blueprint_system_entries():
+		var s: Dictionary = e[0]
+		# ShipManager::AddSystem 0x0049ca00: max(power, 1) bars (AUTO_ASSAULT <weapons power="0"> -> 1 bar).
+		var st := SystemState.new(s.id, s.room, ShipGenerator.start_level(s.id, int(shared_power[s.id])))
+		st.key = e[1]
+		systems[e[1]] = st
 	env = ShipEnvironment.new(self)
 	graph = ShipGraph.new(self)
 
@@ -433,18 +442,16 @@ func _load_weapons() -> void:
 ## ForceIncreasePower loop). Weapons and drones: unpowered. Player: 1 bar for every other system
 ## (iRequiredPower 1); enemy: the full level. Subsystems run on their own level.
 func _startup_power() -> void:
-	for b in blueprint.get("systems", []):
-		if not b.start:
+	for k in system_list():
+		var s := sys(k)
+		if s == null or not s.uses_reactor() or s.id == "weapons" or s.id == "drones" or s.power > 0:
 			continue
-		var s := sys(b.id)
-		if s == null or not s.uses_reactor() or b.id == "weapons" or b.id == "drones" or s.power > 0:
-			continue
-		if b.id == "shields":
+		if s.id == "shields":
 			while increase_power("shields") == "ok":
 				pass
 			continue
 		var want := 1 if is_player else s.get_level()
-		while s.power < want and increase_power(b.id) == "ok":
+		while s.power < want and increase_power(k) == "ok":
 			pass
 
 
@@ -461,16 +468,46 @@ func _load_artillery() -> void:
 		var ws := WeaponState.new(w, maxi(weapons.size(), 4) + artillery.size())
 		ws.powered = false
 		ws.is_artillery = true
+		ws.system_key = SystemState.key_for("artillery", artillery.size() + 1)
 		artillery.append(ws)
 
 
-## System ids in blueprint order (ShipManager vSystemList = creation order).
+## System keys in blueprint order (ShipManager vSystemList = creation order). A key is the system id, except for
+## the 2nd, 3rd ... system of a repeated id (artillery): "artillery#2", "artillery#3" ... (SystemState.key).
 func system_list() -> Array:
 	var out := []
-	for b in blueprint.get("systems", []):
-		if b.start and sys(b.id) != null and not out.has(b.id):
-			out.append(b.id)
+	for e in _blueprint_system_entries():
+		if sys(e[1]) != null:
+			out.append(e[1])
 	return out
+
+
+## [blueprint entry, system key] of every installed (start) blueprint system, in blueprint order.
+func _blueprint_system_entries() -> Array:
+	var out := []
+	var seen := {}
+	for b in blueprint.get("systems", []):
+		if not b.start:
+			continue
+		var n: int = seen.get(b.id, 0) + 1
+		seen[b.id] = n
+		out.append([b, SystemState.key_for(b.id, n)])
+	return out
+
+
+## Every system of an id in blueprint order (several only for artillery: the flagship has up to four).
+func systems_of(id: String) -> Array[SystemState]:
+	var out: Array[SystemState] = []
+	for k in system_list():
+		var s := sys(k)
+		if s.id == id:
+			out.append(s)
+	return out
+
+
+## The artillery system that owns an artillery weapon (ArtillerySystem::projectile).
+func artillery_system(w: WeaponState) -> SystemState:
+	return sys(w.system_key)
 
 
 func has_augment(aug: String) -> bool:
@@ -503,8 +540,13 @@ func sys(id: String) -> SystemState:
 	return systems.get(id)
 
 
-## Blueprint system (raw dictionary).
+## Blueprint system (raw dictionary). A key of a repeated system ("artillery#2") gives that entry.
 func system_by_id(id: String) -> Dictionary:
+	if id.contains("#"):
+		for e in _blueprint_system_entries():
+			if e[1] == id:
+				return e[0]
+		return {}
 	for s in blueprint.get("systems", []):
 		if s.id == id and s.start:
 			return s
@@ -795,14 +837,14 @@ func is_automated() -> bool:
 ## ×0.9, piloting / engines evasion bonus, shields recharge bonus, sensors / doors +1 level.
 func crew_level_in(id: String) -> int:
 	var s := sys(id)
-	if s == null or s.damage > 0 or not is_boostable(id):
+	if s == null or s.damage > 0 or not is_boostable(s.id):
 		return 0
 	if is_automated():
 		return 1
 	var c := active_manning_crew(id)
 	if c == null:
 		return 0
-	return c.skill_level(MAN_SKILL[id]) if MAN_SKILL.has(id) else 1
+	return c.skill_level(MAN_SKILL[s.id]) if MAN_SKILL.has(s.id) else 1
 
 
 ## Systems whose manning adds +1 effective power (ShipSystem ctor bLevelBoostable: sensors 7, doors 8).
@@ -1504,7 +1546,7 @@ const AUTO_REPAIR_RATE := 8.0 / 3.0
 func _auto_repair(seconds: float) -> void:
 	for s in systems.values():
 		if s.damage > 0 and s.partial_repair(AUTO_REPAIR_RATE * seconds * (0.5 if s.under_attack else 1.0)):
-			repair_system(s.id, 1)
+			repair_system(s.key, 1)
 
 
 func opponent_cloaked() -> bool:
@@ -1565,7 +1607,7 @@ func check_for_repower(s: SystemState) -> void:
 		if s.id == "shields" and room < 2 - ((s.power + s.bonus_power) & 1):
 			return  # shields need a whole layer's worth before trying
 		Hooks.emit(&"repower_attempted", self, s.id)
-		var r := increase_power(s.id, false)  # a reactor refusal sets failed_powerup -> NOT ENOUGH POWER
+		var r := increase_power(s.key, false)  # a reactor refusal sets failed_powerup -> NOT ENOUGH POWER
 		if r != "ok":
 			s.user_power = s.power + s.bonus_power  # reactor full: the wish is dropped (lastUserPower = current)
 			Hooks.emit(&"repower_failed", self, s.id, r)
@@ -1673,7 +1715,7 @@ func damage_system_over_time(s: SystemState) -> void:
 	if s == null:
 		return
 	var was_destroyed := s.damage >= s.get_level()
-	damage_system(s.id, 1)
+	damage_system(s.key, 1)
 	s.exploded = not was_destroyed and s.damage >= s.get_level()
 
 
@@ -1786,14 +1828,14 @@ func apply_damage(room_id: int, d: Damage, rng: RandomNumberGenerator) -> Dictio
 		if sd > 0 and sys_resist:
 			out.resisted.append("SYSTEM_CASING")
 		elif sd > 0:
-			damage_system(s.id, sd)
+			damage_system(s.key, sd)
 			out.system = sd
 		elif sd < 0:
-			repair_system(s.id, -sd)  # BOMB_HEAL_SYSTEM (sysDamage -8) [inferred]
+			repair_system(s.key, -sd)  # BOMB_HEAL_SYSTEM (sysDamage -8) [inferred]
 		if d.ion > 0 and AugmentRule.ion_resist(self, rng):
 			out.resisted.append("ION_ARMOR")  # DamageSystem: the ion damage to the system is 0
 		elif d.ion > 0:
-			ion_system(s.id, d.ion)
+			ion_system(s.key, d.ion)
 			out.ion = d.ion
 	# 4. Hull (x2 with hullBust in a room without a system)
 	if d.damage > 0 and hull_resist:
@@ -1865,12 +1907,12 @@ func apply_beam(p: Vector2, last_room: int, last_tile: int, d: Damage, rng: Rand
 			if sd > 0 and sys_resist:
 				out.resisted.append("SYSTEM_CASING")
 			elif sd > 0:
-				damage_system(s.id, sd)
+				damage_system(s.key, sd)
 				out.system = sd
 			if d.ion > 0 and AugmentRule.ion_resist(self, rng):
 				out.resisted.append("ION_ARMOR")
 			elif d.ion > 0:
-				ion_system(s.id, d.ion)
+				ion_system(s.key, d.ion)
 				out.ion = d.ion
 		if d.damage > 0 and hull_resist:
 			out.resisted.append("ROCK_ARMOR")

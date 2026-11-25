@@ -126,7 +126,7 @@ static func charge_bar_visible(ship: ShipState, w: WeaponState) -> bool:
 
 ## ProjectileFactory::iHackLevel: WeaponSystem / ArtillerySystem::OnLoop copy IsSystemHacked of their system.
 static func hack_level(ship: ShipState, w: WeaponState) -> int:
-	var s := ship.sys("artillery" if w.is_artillery else "weapons")
+	var s := ship.artillery_system(w) if w.is_artillery else ship.sys("weapons")
 	return s.hack_effect() if s != null else 0
 
 

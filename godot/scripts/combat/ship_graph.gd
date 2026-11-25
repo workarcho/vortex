@@ -75,9 +75,9 @@ func _primary(room_id: int) -> Array:
 	if s == null or OBSTRUCTION_SYSTEMS.has(s.id) or not CONSOLE_SYSTEMS.has(s.id) 			or (s.id == "artillery" and ship.player_art()):
 		return [-1, ""]
 	var c: Array = _primary_cache.get(room_id, [])
-	if not c.is_empty() and c[0] == s.id:
+	if not c.is_empty() and c[0] == s.key:
 		return [c[1], c[2]]
-	var bp := ship.system_by_id(s.id)
+	var bp := ship.system_by_id(s.key)
 	var slot: int = bp.get("slot", -1)
 	var dir: String = bp.get("slot_dir", "")
 	if slot < 0:
@@ -94,7 +94,7 @@ func _primary(room_id: int) -> Array:
 			dir = pick[1]
 	if slot >= slot_count(room_id):
 		slot = 0
-	_primary_cache[room_id] = [s.id, slot, dir]
+	_primary_cache[room_id] = [s.key, slot, dir]
 	return [slot, dir]
 
 

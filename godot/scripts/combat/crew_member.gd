@@ -604,7 +604,7 @@ func update_task(ship: ShipState, seconds: float) -> void:
 		task = Task.REPAIR_SYSTEM
 		# x0.5 while the system is under a hacking attack (bUnderAttack; rules/crew.md, hacking.md).
 		if s.partial_repair(REPAIR_RATE * repair_speed(false) * seconds * (0.5 if s.under_attack else 1.0)):
-			ship.repair_system(s.id, 1)
+			ship.repair_system(s.key, 1)
 			if ship.is_player and not is_drone():
 				add_skill("repair")
 				crew_stats[1] += 1  # crew record "repairs" (one per repaired bar)

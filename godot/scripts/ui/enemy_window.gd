@@ -16,6 +16,9 @@ var touch := false  # touch layout (set by main.gd each frame): the escape messa
 ## Open-Fold "pan" layout (main.gd `_touch_layout_pan`): only the status block (TARGET title, hull, shields, info
 ## lines) over a dark backing (STATUS_RECT), next to the enemy ship in the shared scene; no system boxes.
 var status_only := false
+## CombatControl::boss_visual (set by main.gd on PC against the flagship): the box_hostiles_boss.png frame at
+## (752, 7) and the boss offsets of the status block, info texts and system boxes (HudLayout.*_BOSS).
+var boss := false
 const STATUS_RECT := Rect2(878, 48, 384, 112)  # frame coordinates of the status block (+ info lines)
 var _ftl_timer := 0.0  # CombatControl::ftl_timer (0.66 s loop), updated only while the enemy is escaping
 
@@ -56,39 +59,59 @@ func _process(d: float) -> void:
 		for e in system_boxes():
 			if Rect2(e[1] + Vector2(16, 0), Vector2(32, 48)).has_point(m):
 				# Enemy SystemBox (bPlayerUI false): tooltip_<name>_enemy, instant.
-				TooltipService.request(TooltipText.system_enemy(e[0]), {"instant": true, "kind": &"system_enemy",
-					"source": self, "ctx": {"ship": enemy, "system": e[0]}})
+				var sid: String = enemy.sys(e[0]).id
+				TooltipService.request(TooltipText.system_enemy(sid), {"instant": true, "kind": &"system_enemy",
+					"source": self, "ctx": {"ship": enemy, "system": sid}})
 	queue_redraw()
 
 
-## [system id, box location] of the enemy system boxes (CombatControl target window order).
+## CombatControl::AddEnemyShip: boss_visual for a boss ship (BossShip::IsBoss; our flagship stages, BOSS_*).
+static func is_boss_ship(e: ShipState) -> bool:
+	return e != null and String(e.blueprint.get("name", "")).begins_with("BOSS_")
+
+
+## The hostile box (box_hostiles2.png, or box_hostiles_boss.png with boss visuals).
+func frame_rect() -> Rect2:
+	return HudLayout.ENEMY_FRAME_BOSS if boss else HudLayout.ENEMY_FRAME
+
+
+func status_origin() -> Vector2:
+	return HudLayout.ENEMY_STATUS_BOSS if boss else HudLayout.ENEMY_STATUS
+
+
+func info_origin() -> Vector2:
+	return HudLayout.ENEMY_INFO_BOSS if boss else HudLayout.ENEMY_INFO
+
+
+## [system key, box location] of the enemy system boxes. CombatControl::UpdateSysBoxes walks
+## ShipManager::GetSystemList = vSystemList, i.e. the blueprint order with one box per system (each of the
+## flagship's artillery systems has its own box), from box + (40, 470) (boss: + (80, 535)), 30 px apart,
+## 45 px further left with more than 12 systems.
 func system_boxes() -> Array:
-	var ids := []
-	for id in SystemState.ORDER:
-		if enemy.sys(id) != null:
-			ids.append(id)
-	var x0 := HudLayout.ENEMY_SYSTEMS.x - (45 if ids.size() > 12 else 0)
+	var keys := enemy.system_list()
+	var o := HudLayout.ENEMY_SYSTEMS_BOSS if boss else HudLayout.ENEMY_SYSTEMS
+	var x0 := o.x - (45 if keys.size() > 12 else 0)
 	var out := []
-	for i in ids.size():
-		out.append([ids[i], Vector2(x0 + HudLayout.ENEMY_SYSTEM_STEP * i, HudLayout.ENEMY_SYSTEMS.y)])
+	for i in keys.size():
+		out.append([keys[i], Vector2(x0 + HudLayout.ENEMY_SYSTEM_STEP * i, o.y)])
 	return out
 
 
 func _draw() -> void:
 	if enemy == null:
 		return
-	var f := HudLayout.ENEMY_FRAME
+	var f := frame_rect()
 	if not front:
-		HudDraw.img(self, "combatUI/box_hostiles2.png", f.position, HudLayout.ENEMY_TINT if enemy.hostile
-			else Color.WHITE)
+		HudDraw.img(self, "combatUI/box_hostiles_boss.png" if boss else "combatUI/box_hostiles2.png", f.position,
+			HudLayout.ENEMY_TINT if enemy.hostile else Color.WHITE)
 		return
 	if status_only:
 		draw_rect(STATUS_RECT, Color(0.02, 0.04, 0.06, 0.6))
-	_draw_status(HudLayout.ENEMY_STATUS)
+	_draw_status(status_origin())
 	var info := info_lines(enemy)
-	HudDraw.text(self, 7, info[0], HudLayout.ENEMY_INFO, info[1], 2)
+	HudDraw.text(self, 7, info[0], info_origin(), info[1], 2)
 	HudDraw.text(self, 7, "
-" + String(info[2]), HudLayout.ENEMY_INFO, info[3], 2)
+" + String(info[2]), info_origin(), info[3], 2)
 	if status_only:
 		return
 	_draw_systems()
@@ -137,7 +160,10 @@ func _draw_escape() -> void:
 	if m[1]:
 		var half := FTL_TIMER * 0.5
 		a = (half - absf(fmod(_ftl_timer, FTL_TIMER) - half)) / half
-	HudDraw.text_with_glow(self, HudDraw.txt(m[0]), escape_message_pos(touch), Color(HudLayout.RED_WARNING, a))
+	var at := escape_message_pos(touch)
+	if boss and not touch:
+		at = Vector2(frame_rect().get_center().x, frame_rect().position.y - 15)
+	HudDraw.text_with_glow(self, HudDraw.txt(m[0]), at, Color(HudLayout.RED_WARNING, a))
 
 
 ## Top-centre of the escape message. PC (vanilla): box y − 15, above the frame. Touch: the scaled TARGET window
@@ -236,12 +262,6 @@ func _tag(p: Vector2, tw: int) -> void:
 
 ## Enemy SystemBoxes (playerUI = false): symbol always, bars with sensors (hacked systems always).
 func _draw_systems() -> void:
-	var ids := []
-	for id in SystemState.ORDER:
-		if enemy.sys(id) != null:
-			ids.append(id)
-	var x0 := HudLayout.ENEMY_SYSTEMS.x - (45 if ids.size() > 12 else 0)
-	for i in ids.size():
-		var s := enemy.sys(ids[i])
-		var at := Vector2(x0 + HudLayout.ENEMY_SYSTEM_STEP * i, HudLayout.ENEMY_SYSTEMS.y)
-		SystemPowerColumn.draw_box(self, enemy, s, at, _t, false, show_power or s.hack_effect() > 0)
+	for e in system_boxes():
+		var s := enemy.sys(e[0])
+		SystemPowerColumn.draw_box(self, enemy, s, e[1], _t, false, show_power or s.hack_effect() > 0)
