@@ -18,6 +18,11 @@ extends RefCounted
 ##   the physics tick rate raised by the same factor, so every fixed simulation step keeps its vanilla length (no
 ##   GameClock.MAX_FACTOR clipping) and timers, AI, projectiles and animations all speed up together. Applied only
 ##   while the world runs (combat not paused, no map / store / event box open); 1x when the group is turned off.
+## - Card drag & reorder: on the ship screen's equipment tab a weapon / drone dragged from its slot is carried as the
+##   whole card (box, icon and label); over another slot of its row the other cards slide aside to preview the new
+##   order, and the drop reorders like a list (insert, not swap) through vanilla adjacent swaps (EQUIP_MOVE), so
+##   power, targets, autofire and mounts follow exactly as with vanilla swaps. Cargo / augments stay vanilla.
+##   Hooks `equipment_move`, `equipment_box_draw`, `equipment_draw_dragged`.
 
 const AutoButton := preload("auto_drone_button.gd")
 const SpeedControl := preload("speed_control.gd")
@@ -30,6 +35,7 @@ const G_SCANNERS := "qol_scanners"
 const G_INFO := "qol_info"
 const G_STATS := "qol_stats"
 const G_SPEED := "qol_speed"
+const G_CARDS := "qol_cards"
 
 const COOLDOWN_ON := "qol.cooldown.numbers"
 const COOLDOWN_FORMAT := "qol.cooldown.format"
@@ -45,6 +51,11 @@ const INFO_PANEL := "qol.info.panel_stats"
 const STATS_PAGE := "qol.stats.more_page"
 const SPEED_BUTTONS := "qol.speed.buttons"
 const SPEED_KEYS := "qol.speed.hotkeys"
+const CARDS_WHOLE := "qol.cards.whole_card"
+const CARDS_REORDER := "qol.cards.reorder"
+const CARDS_SLIDE := "qol.cards.slide"
+## Slide animation: exponential approach, 1 - e^(-rate·dt) of the remaining distance per frame (~0.15 s to settle).
+const CARD_SLIDE_RATE := 25.0
 const SPEED_STEPS := [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0]
 const SPEED_NORMAL := 2  # index of 1x
 
@@ -79,6 +90,9 @@ func _mod_init(c: ModContext) -> void:
 	c.add_filter(&"infobox_content", _infobox_content)
 	c.add_filter(&"stats_more_button", _stats_more_button)
 	c.add_filter(&"input_event", _speed_input)
+	c.add_filter(&"equipment_move", _equipment_move)
+	c.add_filter(&"equipment_box_draw", _equipment_box_draw)
+	c.add_filter(&"equipment_draw_dragged", _equipment_draw_dragged)
 	_load_texts()
 	_map_hyperspace()
 
@@ -110,6 +124,12 @@ func _declare() -> void:
 	ctx.declare_group(G_SPEED, "Game speed", "Speed the game up or slow it down (0.5x to 3x).")
 	ctx.declare(G_SPEED, {"id": SPEED_BUTTONS, "label": "- / + buttons under the scrap counter", "default": true})
 	ctx.declare(G_SPEED, {"id": SPEED_KEYS, "label": "Keys: + / - (also on the numpad)", "default": true})
+	ctx.declare_group(G_CARDS, "Card drag & reorder",
+		"Equipment tab: drag whole weapon / drone cards and reorder them like a list, with a sliding preview.")
+	ctx.declare(G_CARDS, {"id": CARDS_WHOLE, "label": "Drag the whole card (box, icon and label)", "default": true})
+	ctx.declare(G_CARDS, {"id": CARDS_REORDER, "label": "Reorder like a list (insert instead of swap)",
+		"default": true})
+	ctx.declare(G_CARDS, {"id": CARDS_SLIDE, "label": "Slide animation of the other cards", "default": true})
 
 
 ## Extended statistics: the Stats screen shows its MORE STATS button (the statistics themselves are always
@@ -510,3 +530,119 @@ func _infobox_content(d: Dictionary, kind: String, nm: String, c: Dictionary) ->
 	var sell: int = int(c.get("sell_price", cost / 2))
 	out.price = qt("qol_price", cost, sell)
 	return out
+
+
+# ---------------------------------------------------------------- card drag & reorder (equipment tab)
+
+var _card_anim := {}  # EquipmentView instance id -> {&"src": dragged box, box: [current top-left, last usec]}
+
+
+## Weapon / drone slot boxes (the rows that reorder); cargo, augment and over boxes stay vanilla.
+static func is_row_box(b: Vector2i) -> bool:
+	return b.x == ShipInventory.WEAPON or b.x == ShipInventory.DRONE
+
+
+## Items in the row of `b` (slot i holds item i; the lists are compact).
+static func row_items(view: EquipmentView, b: Vector2i) -> int:
+	return view.run.ship.weapons.size() if b.x == ShipInventory.WEAPON else view.run.ship.drones.size()
+
+
+## Insert target of dragging slot `s` onto slot `t` of the same row (-1 = no reorder): an empty slot past the
+## last item means the last position (as vanilla, which appends there).
+static func insert_index(view: EquipmentView, s: Vector2i, t: Vector2i) -> int:
+	if not is_row_box(s) or t.x != s.x or t.y < 0:
+		return -1
+	var n := row_items(view, s)
+	if s.y >= n:
+		return -1
+	return mini(t.y, n - 1)
+
+
+## Order after moving slot `s` to slot `t` (list insert): [old slot index per new slot], e.g. 4 items, s 2 -> t 1
+## gives [0, 2, 1, 3]. Empty slots past the items keep their place.
+static func reorder_preview(n_slots: int, n_items: int, s: int, t: int) -> Array:
+	var order := range(n_items)
+	if s >= 0 and s < n_items and t >= 0:
+		order.remove_at(s)
+		order.insert(mini(t, n_items - 1), s)
+	for i in range(n_items, n_slots):
+		order.append(i)
+	return order
+
+
+## Slot where box `b` is drawn while `s` hovers slot `t` (its own slot outside a reorder preview).
+static func preview_slot(view: EquipmentView, b: Vector2i, s: Vector2i, t: Vector2i) -> int:
+	var dst := insert_index(view, s, t)
+	if dst < 0 or b.x != s.x:
+		return b.y
+	var n_slots := view.run.ship.weapon_slots if b.x == ShipInventory.WEAPON else view.run.ship.drone_slots
+	return reorder_preview(n_slots, row_items(view, s), s.y, t.y).find(b.y)
+
+
+## Drop: a weapon / drone moved onto another filled slot of its row is inserted there by adjacent vanilla swaps
+## (RunIntent.EQUIP_MOVE, each one exactly the vanilla swap: power, targets, autofire and mounts follow).
+func _equipment_move(done: Variant, view: EquipmentView, run: RunState, s: Vector2i, t: Vector2i) -> Variant:
+	if done == true or not settings.on(CARDS_REORDER):
+		return null
+	var dst := insert_index(view, s, t)
+	if dst < 0 or t.y >= row_items(view, s) or dst == s.y:
+		return null  # an empty slot: vanilla moves the item to the end of the list, the same as an insert
+	var step := 1 if dst > s.y else -1
+	var i := s.y
+	while i != dst:
+		if not run.apply(ShipManagement.make(RunIntent.EQUIP_MOVE, {"src": Vector2i(s.x, i),
+				"dst": Vector2i(s.x, i + step)})):
+			break
+		i += step
+	return true
+
+
+## Reorder preview: the boxes of the dragged item's row are drawn at their preview slots, sliding there; the source
+## (drawn empty: the landing gap) glows, the shifted cards do not.
+func _equipment_box_draw(v: Dictionary, view: EquipmentView, b: Vector2i, hover: Vector2i, drag: bool) -> Variant:
+	var key := view.get_instance_id()
+	if not drag or not settings.on(CARDS_REORDER):
+		if _card_anim.has(key):
+			_card_anim.erase(key)  # drop / cancel: snap (the boxes hold their new items now)
+		return null
+	var s := view.drag_source()
+	if not is_row_box(s) or b.x != s.x:
+		return null
+	var target := view.box_rect(Vector2i(b.x, preview_slot(view, b, s, hover))).position
+	var out := v.duplicate()
+	if insert_index(view, s, hover) >= 0:
+		out.look = view.box_look(b, s if b == s else ShipInventory.NONE, true)
+	var anim: Dictionary = _card_anim.get_or_add(key, {})
+	if anim.get(&"src", s) != s:
+		anim.clear()  # another drag started without an idle frame in between: no stale positions
+	anim[&"src"] = s
+	var now := Time.get_ticks_usec()
+	var cur: Vector2 = target
+	if settings.on(CARDS_SLIDE) and anim.has(b):
+		var dt := clampf((now - int(anim[b][1])) / 1000000.0, 0.0, 0.1)
+		cur = (anim[b][0] as Vector2).lerp(target, 1.0 - exp(-CARD_SLIDE_RATE * dt))
+		if cur.distance_to(target) < 0.5:
+			cur = target
+	elif not anim.has(b):
+		cur = v.pos  # first frame of the drag: from the box's own slot
+	anim[b] = [cur, now]
+	out.pos = cur
+	return out
+
+
+## The card position of box `b` drawn last by the reorder preview (tests; null = not in a preview).
+func card_pos(view: EquipmentView, b: Vector2i) -> Variant:
+	var anim: Dictionary = _card_anim.get(view.get_instance_id(), {})
+	return anim[b][0] if anim.has(b) else null
+
+
+## The dragged weapon / drone is carried as its whole card (selected box + icon + label), held at the grab point.
+func _equipment_draw_dragged(_v: Variant, view: EquipmentView, s: Vector2i, mouse: Vector2, grab: Vector2) -> Variant:
+	if not settings.on(CARDS_WHOLE) or not is_row_box(s):
+		return null
+	var look := view.box_look(s, s, false)  # the idle hovered look: `selected` with its item
+	look.overlay = Color(1, 1, 1, 0)
+	view.draw_box_at(s, mouse - grab, look, false)
+	view.drawn_dragged = view.inv().item_at(view.run, s)
+	view.drawn_dragged["card"] = true
+	return Hooks.CANCEL

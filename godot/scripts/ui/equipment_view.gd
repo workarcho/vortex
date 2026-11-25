@@ -6,6 +6,8 @@ extends Control
 ## once on press, touch after > 9 px (finger offset kept); release on an accepted box = EQUIP_MOVE (move / swap),
 ## on the sell box = EQUIP_SELL, anywhere else = nothing. Touch extras [ours]: tap an item then tap a target box,
 ## and a SELL button for the selected item in store mode.
+## Mod hooks (rules/hooks.md): `equipment_move` (a drop / tap-tap move), `equipment_box_draw` (where and how each box
+## is drawn), `equipment_draw_dragged` (the item following the pointer). With no filter the vanilla path is unchanged.
 
 const P := ShipScreen.P
 const ITEM_BOX := Vector2(109, 76)
@@ -42,6 +44,10 @@ var _dragging := false
 var _cursor := Vector2(-1000, -1000)
 var _selected := ShipInventory.NONE  # touch: tapped item (info, tap-tap move, SELL button)
 var _art := {}
+## Tests: what the last _draw put in the boxes ([box, item name] per box drawn with its item) and the dragged item
+## drawn at the pointer ({} = none). Hit-tests and drawing are in this node's local coordinates.
+var drawn_items: Array = []
+var drawn_dragged := {}
 
 
 func setup(r: RunState, p: InputProfile, s: ShipScreen = null) -> void:
@@ -250,6 +256,12 @@ func release(p: Vector2) -> void:
 func _try_move(s: Vector2i, t: Vector2i) -> bool:
 	if not inv().accepts(run, s, t):
 		return false
+	# Hook `equipment_move`: a mod may do the move itself (true) or refuse it (cancel); false = the vanilla move.
+	var done: Variant = Hooks.filter(&"equipment_move", false, self, run, s, t)
+	if Hooks.is_cancel(done):
+		return false
+	if done == true:
+		return true
 	return run.apply(ShipManagement.make(RunIntent.EQUIP_MOVE, {"src": s, "dst": t}))
 
 
@@ -264,6 +276,16 @@ func _cancel() -> void:
 
 func dragging() -> bool:
 	return _dragging and _press != ShipInventory.NONE
+
+
+## The box whose item is being dragged (NONE when no drag).
+func drag_source() -> Vector2i:
+	return _press if dragging() else ShipInventory.NONE
+
+
+## Pointer offset from the dragged box's top-left (the grab point).
+func grab_offset() -> Vector2:
+	return _grab
 
 
 func _chrome_click(p: Vector2) -> bool:
@@ -297,6 +319,8 @@ func _draw() -> void:
 	FtlData.draw_ftl_text(self, 62, FtlData.tr_id("equipment_frame_drones"), P + Vector2(18, 154), dk)
 	FtlData.draw_ftl_text(self, 62, FtlData.tr_id("equipment_frame_cargo"), P + Vector2(18, 264), dk)
 	FtlData.draw_ftl_text(self, 62, FtlData.tr_id("equipment_frame_augments"), P + Vector2(307, 264), dk)
+	drawn_items.clear()
+	drawn_dragged = {}
 	var drag := dragging()
 	var hover := box_at(mouse) if not profile.is_touch() or drag else ShipInventory.NONE
 	# Sell box (store mode), over-capacity drop boxes.
@@ -340,6 +364,10 @@ func _draw_dragged(mouse: Vector2, hover: Vector2i) -> void:
 	var it := inv().item_at(run, _press)
 	if it.is_empty():
 		return
+	# Hook `equipment_draw_dragged`: cancel = a mod drew the dragged item itself.
+	if Hooks.is_cancel(Hooks.filter(&"equipment_draw_dragged", true, self, _press, mouse, _grab)):
+		return
+	drawn_dragged = it.duplicate()
 	var aug := String(it.kind) == "augment"
 	var at := mouse - _grab
 	if not profile.is_touch():
@@ -418,11 +446,29 @@ func box_look(b: Vector2i, hover: Vector2i, drag: bool) -> Dictionary:
 
 func _draw_box(b: Vector2i, hover: Vector2i, drag: bool) -> void:
 	var look := box_look(b, hover, drag)
-	var r := item_rect(b)
+	var at := item_rect(b).position
+	if Hooks.has_filters(&"equipment_box_draw"):
+		# Hook `equipment_box_draw`: {pos, look} of this box; a mod may move it (e.g. a reorder preview).
+		var v: Variant = Hooks.filter(&"equipment_box_draw", {"pos": at, "look": look}, self, b, hover, drag)
+		if Hooks.is_cancel(v):
+			return
+		if v is Dictionary:
+			at = v.get("pos", at)
+			look = v.get("look", look)
+	draw_box_at(b, at, look)
+
+
+## Draws box `b` with `look` (box_look) at top-left `at`: box image, its item unless look.empty, the overlay.
+## `record`: list the item in `drawn_items` (false for a card drawn at the pointer).
+func draw_box_at(b: Vector2i, at: Vector2, look: Dictionary, record := true) -> void:
+	var r := Rect2(at, item_rect(b).size)
 	ShipScreen.img(self, look.img, r.position)
 	if not look.empty:
-		_draw_item(inv().item_at(run, b), r, 1.0)
-	var ov: Color = look.overlay
+		var it := inv().item_at(run, b)
+		_draw_item(it, r, 1.0)
+		if record and not it.is_empty():
+			drawn_items.append([b, String(it.name)])
+	var ov: Color = look.get("overlay", Color(1, 1, 1, 0))
 	if ov.a > 0.0:
 		ShipScreen.img(self, OVERLAY_IMG, r.position, ov)
 

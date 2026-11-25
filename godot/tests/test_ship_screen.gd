@@ -47,6 +47,8 @@ func _run() -> void:
 	_test_box_labels()
 	_test_reactor_info()
 	_test_drag_highlights()
+	await _test_drag_source_empty(false)
+	await _test_drag_source_empty(true)
 
 
 ## Equipment drag highlights (EquipmentBox::OnRender @0052b3d0, Equipment::OnLoop @00524fb0 / MouseMove @00525580):
@@ -123,6 +125,66 @@ func _test_drag_highlights() -> void:
 		"upgradeUI/Equipment/box_base_off.png", "empty": true, "overlay": green}])
 	ev.release(Vector2(5, 5))
 	ev.queue_free()
+
+
+## The dragged item is carried (EquipmentBox::OnRender with forcedEmpty on the drag source): while a weapon is
+## dragged its own box draws no icon / label, the item is drawn once at the pointer, and the other boxes keep
+## theirs. Real input events through _gui_input, mouse (drag on press) and touch (drag after 9 px).
+func _test_drag_source_empty(touch: bool) -> void:
+	print("equipment drag: source box empty (%s)" % ("touch" if touch else "mouse"))
+	var r := make_run()
+	r.give_item("weapon", "LASER_HEAVY_1")
+	var prof := InputProfile.new(InputProfile.TOUCH if touch else InputProfile.PC)
+	prof.run = r
+	var scr := ShipScreen.new()
+	scr.setup(r, prof)
+	add_child(scr)
+	send(r, RunIntent.OPEN_SHIP_SCREEN, {"arg": 2})
+	var ev := scr.equip_view
+	var names: Array = r.ship.weapons.map(func(w): return String(w.bp.name))
+	var W1 := Vector2i(ShipInventory.WEAPON, 1)
+	var c := ev.box_rect(W1).get_center()
+	var away := ev.box_rect(Vector2i(ShipInventory.CARGO, 1)).get_center() + Vector2(0, 40)
+	_mouse(ev, c, true)
+	_motion(ev, c + Vector2(4, 0))
+	_motion(ev, away)
+	await _frames(2)
+	var drawn: Array = ev.drawn_items.map(func(e): return e[0])
+	check("dragging", ev.dragging(), true)
+	check("source box draws no item", drawn.has(W1), false)
+	check("the other weapons keep theirs", [drawn.has(Vector2i(ShipInventory.WEAPON, 0)),
+		drawn.has(Vector2i(ShipInventory.WEAPON, 2))], [true, true])
+	check("the dragged item is drawn at the pointer", ev.drawn_dragged.get("name", ""), names[1])
+	check("source look: empty box", ev.box_look(W1, ShipInventory.NONE, true).empty, true)
+	_mouse(ev, away, false)
+	await _frames(2)
+	check("released away: nothing moved", r.ship.weapons.map(func(w): return String(w.bp.name)), names)
+	check("released: the source draws its item again, nothing at the pointer",
+		[ev.drawn_items.map(func(e): return e[0]).has(W1), ev.drawn_dragged], [true, {}])
+	scr.queue_free()
+	await _frames(1)
+
+
+func _mouse(ev: Control, p: Vector2, down: bool) -> void:
+	var e := InputEventMouseButton.new()
+	e.button_index = MOUSE_BUTTON_LEFT
+	e.pressed = down
+	e.position = p
+	e.global_position = p
+	ev._gui_input(e)
+
+
+func _motion(ev: Control, p: Vector2) -> void:
+	var e := InputEventMouseMotion.new()
+	e.position = p
+	e.global_position = p
+	e.button_mask = MOUSE_BUTTON_MASK_LEFT
+	ev._gui_input(e)
+
+
+func _frames(n: int) -> void:
+	for i in n:
+		await get_tree().process_frame
 
 
 ## Upgrades::OnLoop, reactor hovered [exe]: InfoBox::SetText(upgrade_reactor, reactor_desc); below 5 bars (reactor +

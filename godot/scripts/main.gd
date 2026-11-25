@@ -2101,8 +2101,9 @@ func _cli_pointer(a: String) -> void:
 		func(c): return crew_control.roster.find(c)), crew_control.move_highlight().slice(1)])
 
 
-## --equip-drag: press on box `kind:n` of the ship screen's equipment tab and keep the drag going.
-func _debug_equip_drag(kind: String, n: int) -> void:
+## --equip-drag: press on box `kind:n` of the ship screen's equipment tab and keep the drag going; `over` >= 0 moves
+## the pointer onto box `kind:over` (mid-drag over another slot; sets the CLI pointer like --pointer).
+func _debug_equip_drag(kind: String, n: int, over := -1) -> void:
 	if ship_screen == null or ship_screen.equip_view == null:
 		print("equip drag: no ship screen")
 		return
@@ -2113,6 +2114,10 @@ func _debug_equip_drag(kind: String, n: int) -> void:
 	var c := ev.box_rect(b).get_center()
 	ev.press(c)
 	ev.motion(c + Vector2(20, 0))
+	if over >= 0:
+		var t := ev.box_rect(Vector2i(b.x, over)).get_center() + Vector2(6, -4)
+		ev.motion(t)
+		TooltipService.debug_pointer = ev.get_global_transform() * t
 	print("equip drag %s:%d: dragging %s" % [kind, n, ev.dragging()])
 
 
@@ -3859,7 +3864,8 @@ func _player_crew_left() -> bool:
 #   Pointer simulation (rules/crew_controls.md; real mouse motion is then ignored), applied at 0.2 s:
 #   [--hover-crew=I] (pointer on crew-list entry I's sprite, 0-based)  [--hover-room=me|enemy:ROOM]
 #   [--pointer=X,Y] (screen, 1280×720 frame)  [--drag-box=X1,Y1,X2,Y2] (left press at 1, held at 2)
-#   [--equip-drag=weapon|drone|aug|cargo|over|over_aug:N] (ship screen equipment tab: hold a drag from box N)
+#   [--equip-drag=weapon|drone|aug|cargo|over|over_aug:N[>M]] (ship screen equipment tab: hold a drag from box N;
+#   >M: pointer over box M of the same kind)
 #   [--swap-weapons=A,B] (drag box A onto box B, 1-based)  [--save-stations] [--return-stations@S]
 
 var pending_hits: Array = []
@@ -4295,8 +4301,10 @@ func _handle_cli() -> void:
 		elif a.begins_with("--equip-drag="):
 			# --equip-drag=weapon|drone|aug|cargo|over|over_aug:N (0-based box): press on that equipment box of the
 			# open ship screen and hold the drag (screenshots of the drag highlights; pair with --pointer=X,Y).
+			# N>M: then move the pointer over box M of the same kind (e.g. a reorder preview, QoL card drag).
 			var ep := a.trim_prefix("--equip-drag=").split(":")
-			scheduled.append([0.2, func(): _debug_equip_drag(ep[0], int(ep[1]) if ep.size() > 1 else 0)])
+			var nm := (ep[1] if ep.size() > 1 else "0").split(">")
+			scheduled.append([0.2, func(): _debug_equip_drag(ep[0], int(nm[0]), int(nm[1]) if nm.size() > 1 else -1)])
 		elif a.begins_with("--swap-weapons="):
 			var p := a.trim_prefix("--swap-weapons=").split(",")
 			weapon_control.swap(int(p[0]) - 1, int(p[1]) - 1)

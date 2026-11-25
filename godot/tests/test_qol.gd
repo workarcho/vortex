@@ -39,6 +39,7 @@ func _run() -> void:
 	await _drone_button()
 	_scanners()
 	await _speed()
+	await _cards()
 	Settings.reset_user()
 
 
@@ -330,3 +331,156 @@ func _speed() -> void:
 	await get_tree().process_frame
 	check("scene left: time scale 1", [Engine.time_scale, Engine.physics_ticks_per_second], [1.0, ticks])
 	group("qol_speed", false)
+
+
+# ---------------------------------------------------------------- card drag & reorder
+
+## A run with 4 weapons on the open equipment tab: [run, ShipScreen, EquipmentView].
+func _card_setup(touch := false) -> Array:
+	var r := RunState.new_run(5)
+	for i in 10:
+		if r.phase == RunState.Phase.DIALOG:
+			r.choose(0)
+		elif r.phase == RunState.Phase.MESSAGE:
+			r.apply(RunIntent.make(RunIntent.CONTINUE))
+	r.enemy = {}
+	r.give_item("weapon", "LASER_HEAVY_1")
+	r.give_item("weapon", "LASER_BURST_1")
+	var prof := InputProfile.new(InputProfile.TOUCH if touch else InputProfile.PC)
+	prof.run = r
+	var scr := ShipScreen.new()
+	scr.setup(r, prof)
+	add_child(scr)
+	r.apply(ShipManagement.make(RunIntent.OPEN_SHIP_SCREEN, {"arg": 2}))
+	return [r, scr, scr.equip_view]
+
+
+func _wnames(r: RunState) -> Array:
+	return r.ship.weapons.map(func(w): return String(w.bp.name))
+
+
+func _wbox(i: int) -> Vector2i:
+	return Vector2i(ShipInventory.WEAPON, i)
+
+
+## Drag slot `a` to slot `b` with real input events (mouse: press, move, release; touch: past the 9 px threshold).
+func _card_drag(ev: EquipmentView, a: int, b: int) -> void:
+	var p := ev.box_rect(_wbox(a)).get_center()
+	var q := ev.box_rect(_wbox(b)).get_center()
+	var down := InputEventMouseButton.new()
+	down.button_index = MOUSE_BUTTON_LEFT
+	down.pressed = true
+	down.position = p
+	ev._gui_input(down)
+	for t in [p + Vector2(12, 0), q]:
+		var m := InputEventMouseMotion.new()
+		m.position = t
+		m.button_mask = MOUSE_BUTTON_MASK_LEFT
+		ev._gui_input(m)
+	var up := InputEventMouseButton.new()
+	up.button_index = MOUSE_BUTTON_LEFT
+	up.position = q
+	ev._gui_input(up)
+
+
+func _cards() -> void:
+	print("Card drag & reorder")
+	# group OFF: vanilla swap
+	var k := _card_setup()
+	var r: RunState = k[0]
+	var w: Array = _wnames(r)
+	check("4 weapons", w.size(), 4)
+	_card_drag(k[2], 0, 3)
+	check("OFF: slot 1 -> 4 swaps (vanilla)", _wnames(r), [w[3], w[1], w[2], w[0]])
+	k[1].queue_free()
+	group("qol_cards", true)
+	var cases := [[2, 1, [0, 2, 1, 3]], [0, 3, [1, 2, 3, 0]], [3, 0, [3, 0, 1, 2]], [1, 2, [0, 2, 1, 3]]]
+	for c in cases:
+		k = _card_setup()
+		r = k[0]
+		w = _wnames(r)
+		_card_drag(k[2], c[0], c[1])
+		check("ON: slot %d -> %d reorders like a list" % [c[0] + 1, c[1] + 1], _wnames(r), c[2].map(func(i): return w[i]))
+		k[1].queue_free()
+	# Power, targets and mounts follow the weapons as with vanilla swaps.
+	k = _card_setup()
+	r = k[0]
+	var ship := r.ship
+	ship.reactor_max = 20
+	ship.sys("weapons").level = 8
+	for x in ship.weapons:
+		if String(x.bp.name) != "LASER_HEAVY_1":
+			ship.try_power_weapon(x)
+	ship.weapons[1].target_room = 2
+	ship.weapons[1].autofire = true
+	var before := {}
+	for x in ship.weapons:
+		before[String(x.bp.name)] = [x.powered, x.target_room, x.autofire]
+	var used := ship.weapons_power_used()
+	var objs: Array = ship.weapons.duplicate()
+	_card_drag(k[2], 0, 3)
+	var after := {}
+	for x in ship.weapons:
+		after[String(x.bp.name)] = [x.powered, x.target_room, x.autofire]
+	check("ON: power / target / autofire stay with each weapon", after, before)
+	check("  weapon system power unchanged", ship.weapons_power_used(), used)
+	check("  same weapon objects, moved", ship.weapons, [objs[1], objs[2], objs[3], objs[0]])
+	check("  mount = slot", ship.weapons.map(func(x): return x.mount_index), [0, 1, 2, 3])
+	k[1].queue_free()
+	# Touch drag.
+	k = _card_setup(true)
+	r = k[0]
+	w = _wnames(r)
+	_card_drag(k[2], 2, 1)
+	check("ON, touch: slot 3 -> 2", _wnames(r), [w[0], w[2], w[1], w[3]])
+	k[1].queue_free()
+	# Preview while dragging: whole card at the pointer, the others slide to their preview slots.
+	Settings.set_value("qol.cards.slide", false)
+	k = _card_setup()
+	var ev: EquipmentView = k[2]
+	var first: String = _wnames(k[0])[0]
+	ev.press(ev.box_rect(_wbox(0)).get_center())
+	TooltipService.debug_pointer = ev.get_global_transform() * ev.box_rect(_wbox(2)).get_center()
+	for i in 3:
+		await get_tree().process_frame
+	var at := func(i): return ev.box_rect(_wbox(i)).position
+	check("preview 1 -> 3: cards at [3, 1, 2, 4] (no slide)", [qol.card_pos(ev, _wbox(0)), qol.card_pos(ev,
+		_wbox(1)), qol.card_pos(ev, _wbox(2)), qol.card_pos(ev, _wbox(3))], [at.call(2), at.call(0), at.call(1),
+		at.call(3)])
+	check("  whole card follows the pointer, its slot draws no item", [ev.drawn_dragged.get("card", false),
+		ev.drawn_items.map(func(e): return e[0]).has(_wbox(0))], [true, false])
+	check("  the landing gap glows, shifted cards do not", [qol._equipment_box_draw({"pos": Vector2.ZERO,
+		"look": {}}, ev, _wbox(0), _wbox(2), true).look.img, qol._equipment_box_draw({"pos": Vector2.ZERO,
+		"look": {}}, ev, _wbox(1), _wbox(2), true).look.img], ["upgradeUI/Equipment/box_weapons_off_selected.png",
+		"upgradeUI/Equipment/box_weapons_on.png"])
+	TooltipService.debug_pointer = ev.get_global_transform() * ev.box_rect(Vector2i(ShipInventory.CARGO, 1)).get_center()
+	for i in 3:
+		await get_tree().process_frame
+	check("  over cargo: no preview (own slots)", [qol.card_pos(ev, _wbox(1)), qol.card_pos(ev, _wbox(0))],
+		[at.call(1), at.call(0)])
+	# Slide animation: part of the way on the next frame, there after a short time.
+	Settings.set_value("qol.cards.slide", true)
+	TooltipService.debug_pointer = ev.get_global_transform() * ev.box_rect(_wbox(3)).get_center()
+	await get_tree().create_timer(0.02).timeout
+	var mid: Vector2 = qol.card_pos(ev, _wbox(3))
+	check("slide: on its way left", mid.x < at.call(3).x and mid.x > at.call(2).x, true)
+	await get_tree().create_timer(0.6).timeout
+	check("  settled in its preview slot", qol.card_pos(ev, _wbox(3)), at.call(2))
+	ev.release(ev.box_rect(Vector2i(ShipInventory.CARGO, 1)).get_center())
+	await get_tree().process_frame
+	await get_tree().process_frame
+	check("drop on cargo: vanilla move, preview cleared", [ev.inv().item_at(k[0], Vector2i(ShipInventory.CARGO,
+		1)).get("name", ""), qol.card_pos(ev, _wbox(1))], [first, null])
+	TooltipService.debug_pointer = null
+	k[1].queue_free()
+	group("qol_cards", false)
+	k = _card_setup()
+	ev = k[2]
+	ev.press(ev.box_rect(_wbox(0)).get_center())
+	await get_tree().process_frame
+	await get_tree().process_frame
+	check("OFF: icon only at the pointer, no card positions", [ev.drawn_dragged.get("card", false),
+		qol.card_pos(ev, _wbox(1))], [false, null])
+	ev.release(Vector2(5, 5))
+	k[1].queue_free()
+	await get_tree().process_frame
