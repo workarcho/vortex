@@ -36,6 +36,9 @@ const SRC := """
 <event name="UNKNOWN"><text>x</text><autoReward level="LOW">scrap</autoReward></event>
 <event name="OVERWRITE"><text>x</text><item_modify><item type="scrap" min="100" max="100"/><item type="fuel" min="5" max="5"/></item_modify><autoReward level="LOW">fuel_only</autoReward></event>
 <event name="MOD"><text>x</text><item_modify><item type="fuel" min="-3" max="-3"/><item type="scrap" min="10" max="10"/></item_modify></event>
+<event name="ITEMR"><text>x</text><autoReward level="MED">item</autoReward></event>
+<event name="WEAPR"><text>x</text><autoReward level="LOW">weapon</autoReward></event>
+<event name="STDM"><text>The ship explodes.</text><autoReward level="MED">standard</autoReward></event>
 <event name="HAS_ITEM"><text>x</text><weapon name="LASER_BURST_1"/><autoReward level="LOW">weapon</autoReward></event>
 <event name="CHOICES">
 	<text>pick</text>
@@ -91,7 +94,7 @@ func _ready() -> void:
 
 func _run() -> void:
 	var db := make_db()
-	check("parsed events", db.events.size(), 17)
+	check("parsed events", db.events.size(), 20)
 	check("parsed lists", db.lists.size(), 4)
 
 	# --- list resolution (uniform pick), AE OVERRIDE_
@@ -180,6 +183,7 @@ func _run() -> void:
 	check("item_modify values", [eng(db, 1).base_event("MOD").res.fuel, eng(db, 1).base_event("MOD").res.scrap],
 		[-3, 10])
 	check("explicit weapon: reward item step skipped", eng(db, 1).base_event("HAS_ITEM").weapon, "LASER_BURST_1")
+	_auto_reward_item_checks(db)
 	var w := eng(db, 5)
 	var item := w.random_item("weapon")
 	check("random weapon has rarity > 0", int(db.rarity.weapon.get(item, 0)) > 0, true)
@@ -254,6 +258,67 @@ func _run() -> void:
 ## When the effects apply (rules/events.md §3.4): UpdateLocation's (hull damage, ...) when the box opens,
 ## ModifyResources' (resources, items, ...) when a choice is picked; the reward box lists the event before it is
 ## applied (raw amounts); the next box's affordability sees the totals after the parent's resources.
+## GenerateReward (005bbae0) item rewards: every item step comes with scrap@level (drawn after the item); a
+## standard / stuff that turns into `item` (3% / 6%) keeps its two resources and re-rolls the scrap at the level;
+## an event that already grants an item stops before the item step (no scrap from a `weapon` reward). The reward box
+## lists the scrap with the item, and Continue applies it once.
+func _auto_reward_item_checks(db: EventDB) -> void:
+	print("autoReward item rewards")
+	var bad := {}
+	for s in 100:
+		var it := eng(db, s).base_event("ITEMR")
+		var kinds := ["weapon", "drone", "augment"].filter(func(k): return String(it[k]) != "")
+		if kinds.size() != 1 or it.res.scrap < int(0.8 * 15) or it.res.scrap > int(1.3 * 15):
+			bad["item MED: one item + scrap 12-19"] = [kinds, it.res]
+		var wr := eng(db, s).base_event("WEAPR")
+		if wr.weapon == "" or wr.res.scrap < int(0.5 * 15) or wr.res.scrap > int(0.7 * 15):
+			bad["weapon LOW: weapon + scrap 7-10"] = [wr.weapon, wr.res]
+	check("item / weapon rewards carry scrap (100 seeds, failures)", bad, {})
+	var hi := eng(db, 1).base_event("HAS_ITEM")
+	check("explicit weapon: weapon reward stops before the item step (no scrap)", [hi.weapon, hi.res.scrap],
+		["LASER_BURST_1", 0])
+	# standard -> item (3%): find a seed, check scrap + two resources + one item.
+	var seed := -1
+	var ev := {}
+	for s in 2000:
+		var e := eng(db, s).base_event("STDM")
+		if e.weapon != "" or e.drone != "" or e.augment != "":
+			seed = s
+			ev = e
+			break
+	check("standard -> item happens (seed found)", seed >= 0, true)
+	if seed < 0:
+		return
+	var nz := ["fuel", "missiles", "drones"].filter(func(k): return int(ev.res[k]) != 0)
+	check("standard -> item: scrap@MED kept (12-19)", ev.res.scrap >= 12 and ev.res.scrap <= 19, true)
+	check("standard -> item: two LOW resources kept", nz.size(), 2)
+	var kind := "weapon" if ev.weapon != "" else ("drone" if ev.drone != "" else "augment")
+	var r := RunState.new()
+	r.engine = eng(db, 3)
+	r.ship = ShipState.new("PLAYER_SHIP_HARD", true)
+	r.ship.scrap = 10
+	var scrap0 := r.ship.scrap
+	r.show_event(ev)
+	var listed := r.dialog_rewards.filter(func(x): return x[0] == "scrap")
+	check("box lists the scrap with the item", [listed, r.dialog_rewards.any(func(x): return x[0] == kind)],
+		[[["scrap", int(ev.res.scrap)]], true])
+	check("scrap pending while the box is open", r.ship.scrap, scrap0)
+	r.choose(0)
+	check("Continue applies the scrap once", r.ship.scrap - scrap0, int(ev.res.scrap))
+	check("box closed", r.phase, RunState.Phase.IDLE)
+	# The user's data: DESTROYED_DEFAULT (MED standard) turned into an item keeps its scrap.
+	var re := EventEngine.new(EventDB.shared())
+	var found := false
+	for s in 3000:
+		re.rng.seed = s
+		var dd := re.base_event("DESTROYED_DEFAULT")
+		if dd.weapon != "" or dd.drone != "" or dd.augment != "":
+			found = true
+			check("data: DESTROYED_DEFAULT item outcome also gives scrap (seed %d)" % s, int(dd.res.scrap) > 0, true)
+			break
+	check("data: DESTROYED_DEFAULT item outcome found", found, true)
+
+
 func _timing_checks(db: EventDB) -> void:
 	print("Effect timing: box open vs choice")
 	var r := RunState.new()

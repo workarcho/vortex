@@ -331,32 +331,31 @@ func resolve_text(n: XmlNode) -> String:
 
 # ------------------------------------------------------------------ rewards (§4.1)
 
-## GenerateReward: `level` "LOW"/"MED"/"HIGH" exactly, anything else = RANDOM (rand%3). Results are assigned
-## (overwrite item_modify values). The item step is skipped when the event already grants an item.
+## GenerateReward (005bbae0): `level` "LOW"/"MED"/"HIGH" exactly, anything else = RANDOM (rand%3). Results are
+## assigned (GetValue @005bb820 overwrites item_modify values). The resource part runs first; `standard` / `stuff`
+## then roll their 3% / 6% chance of turning the type into `item` (KEEPING the scrap and resources already rolled).
+## Then, when the event already grants a weapon / drone / augment, it stops. Otherwise `item` picks weapon / drone /
+## augment (rand%3), and each of these draws a random item of that kind and THEN (re)assigns scrap@level — so an item
+## reward always comes with scrap, and a standard / stuff that became `item` gets its scrap re-rolled at the level.
 func generate_reward(ev: Dictionary, type: String, level_str: String) -> void:
 	var lv: int = {"LOW": 0, "MED": 1, "HIGH": 2}.get(level_str, 3)
 	if lv == 3:
 		lv = r(3)
 	ev.auto_reward = [type, lv]
 	var tun := RunTuning.section("reward")
-	var has_item: bool = ev.weapon != "" or ev.drone != "" or ev.augment != ""
 	match type:
 		"standard":
-			if r(100) < int(tun.get("standard_item_percent", 3)):
-				if not has_item:
-					_reward_item(ev, ["weapon", "drone", "augment"][r(3)])
-				return
 			ev.res.scrap = reward_scrap(lv)
 			for k in _two_resources():
 				ev.res[k] = reward_amount(k, 0)
+			if r(100) < int(tun.get("standard_item_percent", 3)):
+				type = "item"
 		"stuff":
-			if r(100) < int(tun.get("stuff_item_percent", 6)):
-				if not has_item:
-					_reward_item(ev, ["weapon", "drone", "augment"][r(3)])
-				return
 			ev.res.scrap = reward_scrap(0)
 			for k in _two_resources():
 				ev.res[k] = reward_amount(k, lv)
+			if r(100) < int(tun.get("stuff_item_percent", 6)):
+				type = "item"
 		"fuel", "missiles", "droneparts":
 			ev.res.scrap = reward_scrap(lv)
 			ev.res[_res_key(type)] = reward_amount(_res_key(type), lv)
@@ -365,15 +364,14 @@ func generate_reward(ev: Dictionary, type: String, level_str: String) -> void:
 			ev.res[k] = reward_amount(k, lv)
 		"scrap_only":
 			ev.res.scrap = reward_scrap(lv)
-		"item":
-			if not has_item:
-				_reward_item(ev, ["weapon", "drone", "augment"][r(3)])
-		"weapon", "drone", "augment":
-			ev.res.scrap = reward_scrap(lv)
-			if not has_item:
-				_reward_item(ev, type)
-		_:
-			pass  # unknown type (vanilla's "scrap") gives nothing
+	# Unknown types (vanilla's "scrap") give nothing.
+	if ev.weapon != "" or ev.drone != "" or ev.augment != "":
+		return
+	if type == "item":
+		type = ["weapon", "drone", "augment"][r(3)]
+	if type in ["weapon", "drone", "augment"]:
+		_reward_item(ev, type)
+		ev.res.scrap = reward_scrap(lv)
 
 
 func _res_key(t: String) -> String:
