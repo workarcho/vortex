@@ -9,6 +9,8 @@
 <text name="phone_layout">Phone Screen Layout: \1</text>  <!-- Options window, GAMEPLAY, touch only (GameOptions.phone_layout) -->
 <text name="phone_layout_column">Column</text>
 <text name="phone_layout_pan">Pan</text>
+<text name="calibrate_hud">Calibrate HUD</text>  <!-- Options window button, touch only, main menu only (HUD calibration screen) -->
+<text name="calibrate_hud_in_run">Calibrate the HUD from the main menu's Options.</text>
 <text name="window_size">Window Size: \1</text>  <!-- Options window, GAMEPLAY, PC only (GameOptions.window_size) -->
 <text name="profile_button">PROFILE \1</text>  <!-- Main menu corner button (ProfileView, ProfileSlots) -->
 <text name="profiles_title">PROFILES</text>

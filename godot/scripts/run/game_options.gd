@@ -12,8 +12,22 @@ extends RefCounted
 ## (default) or "pan" (main.gd `phone_layout()`; CLI `--phone-layout=` overrides it; touch mode only).
 ## Ours (not FTL): `window_size` — PC window size, an index into WINDOW_SIZES (16:9: 720p, 1080p, 1440p, 4K); applied
 ## when windowed (shrunk to the screen, aspect kept); a `--resolution` command line wins at startup. PC only.
+## Ours (not FTL): `hud_calibration` — touch combat HUD scales set in the "Calibrate HUD" screen (Options window
+## CALIBRATE HUD button, touch only; scripts/ui/hud_calibration_panel.gd), per device form factor (HUD_FORM_FACTORS, from the
+## canvas: `hud_form_factor`) so the closed and the open Fold keep their own: {form factor: {group: scale}} with the
+## groups HUD_GROUPS ("top": ship status, crew list, top buttons, PAUSE / CANCEL; "bottom": systems bar, reactor,
+## subsystems, power toggle; "weapons": weapons / drones panels). A group absent = automatic (main.gd defaults).
+## Saved in the [hud_calibration] section as "<form factor>_<group>" keys. main.gd `_hud_calibration` applies them;
+## `--hud-scale=` overrides them.
 
 const PATH := "user://ftl_options.cfg"
+const HUD_FORM_FACTORS := ["phone", "fold_cover", "fold_inner"]  # hud_calibration keys (hud_form_factor)
+const HUD_GROUPS := ["top", "bottom", "weapons"]
+const HUD_SCALE_MIN := 0.75  # calibration slider range and step
+const HUD_SCALE_MAX := 2.0
+const HUD_SCALE_STEP := 0.05
+const HUD_TALL_MIN_H := 800.0  # = main.gd TOUCH_TALL_MIN_H: canvases at least this high are the open Fold's
+const HUD_COVER_MIN_ASPECT := 2.35  # 720-high canvases at least this wide (w / h) are a Fold cover screen (~2.45)
 const EVENT_CHOICE_IDS := ["event_choice_brief_delay", "event_choice_no_delay", "event_choice_disable_hotkeys"]
 const FULLSCREEN_IDS := ["fullscreen_0", "fullscreen_1", "fullscreen_2", "fullscreen_3"]
 const FOLD_LAYOUTS := ["split", "pan"]  # fold_layout values, cycle order (text ids fold_layout_<value>, text_ours.xml)
@@ -21,6 +35,7 @@ const PHONE_LAYOUTS := ["column", "pan"]  # phone_layout values, cycle order (te
 const WINDOW_SIZES := [Vector2i(1280, 720), Vector2i(1920, 1080), Vector2i(2560, 1440), Vector2i(3840, 2160)]
 
 static var persist := false
+static var path := PATH  # tests point it at a test file
 static var fullscreen := 0  # 0 off, 1 stretch, 2 borders, 3 native (every non-zero value = Godot fullscreen)
 static var vsync := true
 static var frame_limit := true  # 60 fps cap
@@ -35,6 +50,7 @@ static var music_volume := 1.0
 static var fold_layout := "split"  # ours: tall touch canvas combat layout (FOLD_LAYOUTS)
 static var phone_layout := "column"  # ours: phone (720-high) touch canvas combat layout (PHONE_LAYOUTS)
 static var window_size := 0  # ours: PC window size (WINDOW_SIZES index)
+static var hud_calibration := {}  # ours: {form factor: {group: scale}} (touch HUD calibration)
 static var _applied_size := -1  # window_size last pushed to the window (a manual resize is kept until it changes)
 static var _loaded := false
 
@@ -47,11 +63,16 @@ static func load_file() -> void:
 	if not persist:
 		return
 	var cf := ConfigFile.new()
-	if cf.load(PATH) != OK:
+	if cf.load(path) != OK:
 		return
 	for k in KEYS:
 		if cf.has_section_key("options", k):
 			set_value(k, cf.get_value("options", k))
+	hud_calibration = {}
+	for ff in HUD_FORM_FACTORS:
+		for g in HUD_GROUPS:
+			if cf.has_section_key("hud_calibration", "%s_%s" % [ff, g]):
+				_set_hud_scale(ff, g, float(cf.get_value("hud_calibration", "%s_%s" % [ff, g])))
 
 
 static func save() -> void:
@@ -60,7 +81,10 @@ static func save() -> void:
 	var cf := ConfigFile.new()
 	for k in KEYS:
 		cf.set_value("options", k, get_value(k))
-	cf.save(PATH)
+	for ff in hud_calibration:
+		for g in hud_calibration[ff]:
+			cf.set_value("hud_calibration", "%s_%s" % [ff, g], hud_calibration[ff][g])
+	cf.save(path)
 
 
 static func get_value(k: String) -> Variant:
@@ -98,6 +122,43 @@ static func set_value(k: String, v: Variant) -> void:
 		"fold_layout": fold_layout = str(v) if FOLD_LAYOUTS.has(str(v)) else FOLD_LAYOUTS[0]
 		"phone_layout": phone_layout = str(v) if PHONE_LAYOUTS.has(str(v)) else PHONE_LAYOUTS[0]
 		"window_size": window_size = clampi(int(v), 0, WINDOW_SIZES.size() - 1)
+
+
+## Touch HUD calibration form factor of a canvas (visible size): "fold_inner" for tall canvases (open Fold, height
+## ≥ HUD_TALL_MIN_H), "fold_cover" for very wide 720-high ones (aspect ≥ HUD_COVER_MIN_ASPECT: the Fold's cover
+## screen, ~1766 × 720), else "phone" (~1600 × 720).
+static func hud_form_factor(canvas: Vector2) -> String:
+	if canvas.y >= HUD_TALL_MIN_H:
+		return "fold_inner"
+	if canvas.y > 0.0 and canvas.x / canvas.y >= HUD_COVER_MIN_ASPECT:
+		return "fold_cover"
+	return "phone"
+
+
+## The saved calibration of a form factor ({group: scale}; {} = automatic).
+static func hud_scales(form_factor: String) -> Dictionary:
+	return (hud_calibration.get(form_factor, {}) as Dictionary).duplicate()
+
+
+## Replaces the saved calibration of a form factor ({} removes it) and saves the options file.
+static func set_hud_scales(form_factor: String, scales: Dictionary) -> void:
+	hud_calibration.erase(form_factor)
+	for g in scales:
+		_set_hud_scale(form_factor, String(g), float(scales[g]))
+	save()
+
+
+## A slider value: clamped to the calibration range, on its step.
+static func clamp_hud_scale(v: float) -> float:
+	return clampf(roundf(v / HUD_SCALE_STEP) / (1.0 / HUD_SCALE_STEP), HUD_SCALE_MIN, HUD_SCALE_MAX)  # (1.2, not 1.2000…02)
+
+
+static func _set_hud_scale(form_factor: String, group: String, v: float) -> void:
+	if not HUD_FORM_FACTORS.has(form_factor) or not HUD_GROUPS.has(group) or v <= 0.0:
+		return
+	if not hud_calibration.has(form_factor):
+		hud_calibration[form_factor] = {}
+	hud_calibration[form_factor][group] = clamp_hud_scale(v)
 
 
 ## Pushes the implemented options to the engine (skipped headless: no window to change).

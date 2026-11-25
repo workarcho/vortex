@@ -50,6 +50,8 @@ var touch := false  # touch input profile: screens centred in the canvas, bands 
 var frame_fill: Control  # touch only: mirrored background around the centred frame (scripts/ui/frame_fill.gd)
 ## Set by the in-game Esc menu's HANGAR command: the next title scene opens straight in the hangar.
 static var open_hangar_next := false
+## Set by the HUD calibration screen (main.gd) when it closes: the next title scene reopens the options window.
+static var open_options_next := false
 static var _setup_forced := false  # --data-setup already honoured (once per process)
 
 
@@ -111,6 +113,9 @@ func _ready() -> void:
 	if open_hangar_next:
 		open_hangar_next = false
 		title.open_hangar()
+	if open_options_next:
+		open_options_next = false
+		vanilla_options.show_screen()
 	_handle_cli(args)
 
 
@@ -150,6 +155,7 @@ func _build() -> void:
 	vanilla_options.visible = false
 	hud_root.add_child(vanilla_options)
 	vanilla_options.mod_options.connect(func(): options.show_screen())
+	vanilla_options.calibrate.connect(open_hud_calibration)
 	toast = Label.new()
 	toast.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	toast.position = Vector2(190, 640)  # bottom line at y ~690 (a long one wraps upwards)
@@ -357,6 +363,17 @@ static func prepare_run(cfg: Dictionary) -> void:
 
 
 func open_sandbox() -> void:
+	Main.run_mode = false
+	Main.run_setup = {}
+	RunState.current = null
+	FrameHost.change_scene(get_tree(), MAIN_SCENE)
+
+
+## Options window CALIBRATE HUD (touch): main.tscn as the HUD calibration sandbox (main.gd `calibrate_hud`; no run,
+## nothing saved but the calibration); closing it comes back here with the options window open.
+func open_hud_calibration() -> void:
+	started = true
+	Main.calibrate_hud = true
 	Main.run_mode = false
 	Main.run_setup = {}
 	RunState.current = null

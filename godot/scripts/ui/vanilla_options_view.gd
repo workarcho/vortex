@@ -11,6 +11,7 @@ extends Control
 
 signal closed
 signal mod_options
+signal calibrate  # touch: CALIBRATE HUD clicked (main menu only)
 
 const POS := Vector2(327, 140)  # OptionsScreen::position
 const WINDOW_AT := Vector2(230, 140)  # optionsUI_new.png [screenshot]
@@ -20,6 +21,9 @@ const GAMEPLAY := ["event_choice", "show_paths", "achievement_popups", "focus_pa
 ## a sixth GAMEPLAY line, and the phone (720-high canvas) combat layout, Column / Pan (GameOptions.phone_layout), the
 ## fifth line in place of "Configure Keyboard Hotkeys" (no keyboard in touch mode). Changing either in combat
 ## re-lays the HUD out at once (main.gd `_touch_layout_tick`).
+## Ours, touch only: a CALIBRATE HUD button under MOD OPTIONS (a seventh GAMEPLAY line would overflow the frame)
+## opens the HUD calibration screen (signal `calibrate`; title.gd -> main.gd calibration sandbox); in a run
+## (`in_run`) it only says to use the main menu's Options.
 const TOUCH_GAMEPLAY := ["phone_layout", "fold_layout"]
 const PC_GAMEPLAY := ["window_size"]  # ours, PC only: GameOptions.window_size (sixth GAMEPLAY line)
 const LINE_FONT := 13
@@ -35,6 +39,7 @@ var buttons := {}
 var message := ""
 var _msg_t := 0.0
 var _drag := ""  # slider being dragged
+var in_run := false  # opened from the in-run Esc menu (main.gd): no HUD calibration from here
 
 
 func _ready() -> void:
@@ -70,6 +75,10 @@ func _build_buttons() -> void:
 		"font": 63, "line_h": 26, "y_off": -2, "base": "optionsUI/button_deleteprofile_base.png", "base_off": Vector2(-15, -15)}
 	var mw := FtlData.ftl_text_width(62, "MOD OPTIONS") + 24
 	buttons["mods"] = {"rect": Rect2(POS.x + 692 - mw, 498, mw, 28), "label": "MOD OPTIONS", "font": 62}
+	if TooltipService.touch:
+		var cal := FtlData.tr_id("calibrate_hud").to_upper()
+		var kw := FtlData.ftl_text_width(62, cal) + 24
+		buttons["calibrate_hud"] = {"rect": Rect2(POS.x + 692 - kw, 536, kw, 28), "label": cal, "font": 62}
 
 
 static func slider_box(which: String) -> Rect2:
@@ -150,6 +159,11 @@ func click(p: Vector2) -> String:
 			_say("Only English is available.")
 		"hotkeys":
 			_say("Hotkey configuration is not implemented yet.")
+		"calibrate_hud":
+			if in_run:
+				_say(FtlData.tr_id("calibrate_hud_in_run"))
+			else:
+				calibrate.emit()
 		"sound", "music":
 			_drag = it
 			_set_slider(it, p.x)

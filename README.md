@@ -29,6 +29,10 @@ Android 8+ is required. The Windows version needs no installation: unzip and run
 - **Hold one finger and tap with another** to remove power, or **hold and drag** to select several crew.
 - Holding a finger on anything shows its tooltip.
 - Options → *Phone / Unfolded Screen Layout* switches between the available layouts.
+- Options (main menu) → **CALIBRATE HUD** opens a paused practice battle (ion weapons only, harmless enemy) with three
+  sliders: **Top** (ship status, crew list, top buttons, PAUSE / CANCEL), **Bottom** (systems bar, reactor,
+  subsystems, + / −) and **Weapons & drones**. The HUD changes as you slide; SAVE keeps the sizes for this screen
+  (phone, folded and unfolded Fold are saved separately), RESET goes back to the automatic sizes.
 
 ## Live wallpaper (Wallpaper Engine)
 
@@ -65,6 +69,7 @@ Requires [Godot 4.7](https://godotengine.org) with its export templates.
 ```
 godot --path godot                     # run (PC)
 godot --path godot -- --device=phone   # preview the phone layout on PC
+godot --path godot -- --device=phone --calibrate-hud   # the HUD calibration screen (nothing is saved from here)
 bash tools/run_tests.sh                # test suites
 ```
 

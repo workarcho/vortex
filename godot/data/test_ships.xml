@@ -172,4 +172,58 @@
 	<crewCount amount="1" class="slug"/>
 </shipBlueprint>
 
+<!--
+  TEST_SHIP_CALIBRATE: the touch HUD calibration sandbox's player ship (main.gd CALIB_PLAYER_SHIP, Options window
+  CALIBRATE HUD). A practical late-game ship: every system the fed_cruiser layout holds within the vanilla limits
+  (8 main systems, 4 subsystems; the same choice as TEST_SHIP_MAX) at 2-4 bars, reactor 16, 4 weapon slots (main.gd
+  puts four ion weapons there), 3 drone slots (three harmless drones), 6 crew.
+-->
+<shipBlueprint name="TEST_SHIP_CALIBRATE" layout="fed_cruiser" img="fed_cruiser">
+	<systemList>
+		<shields power="4" room="11" start="true"/>
+		<engines power="3" room="3" start="true" img="room_engines_2"/>
+		<oxygen power="2" room="9" start="true" img="room_oxygen_4"/>
+		<weapons power="4" room="15" start="true"/>
+		<drones power="4" room="16" start="true" img="room_drones_5"/>
+		<pilot power="2" room="4" start="true"/>
+		<sensors power="2" room="13" start="true">
+			<slot>
+				<direction>down</direction>
+				<number>1</number>
+			</slot>
+		</sensors>
+		<doors power="2" room="8" start="true" img="room_doors_5">
+			<slot>
+				<direction>right</direction>
+				<number>0</number>
+			</slot>
+		</doors>
+		<cloaking power="2" room="12" start="true" img="room_cloaking_8"/>
+		<battery power="1" room="14" start="true" img="room_battery_3"/>
+		<mind power="2" room="5" start="true" img="room_mind_7"/>
+		<hacking power="2" room="2" start="true" img="room_hacking_3">
+			<slot>
+				<direction>left</direction>
+				<number>0</number>
+			</slot>
+		</hacking>
+	</systemList>
+	<weaponSlots>4</weaponSlots>
+	<droneSlots>3</droneSlots>
+	<weaponList count="4" missiles="10">
+		<weapon name="ION_1"/>
+		<weapon name="ION_2"/>
+		<weapon name="ION_STUN"/>
+		<weapon name="ION_4"/>
+	</weaponList>
+	<droneList drones="10"/>
+	<health amount="30"/>
+	<maxPower amount="16"/>
+	<crewCount amount="2" class="human"/>
+	<crewCount amount="1" class="engi"/>
+	<crewCount amount="1" class="mantis"/>
+	<crewCount amount="1" class="rock"/>
+	<crewCount amount="1" class="slug"/>
+</shipBlueprint>
+
 </FTL>

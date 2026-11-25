@@ -90,6 +90,24 @@ static var weapon_preset := "Blueprint"  # "custom" after --player-weapons=
 ## (--power-enemy-weapons=, --enemy-drones=) still add their weapons / drones.
 static var harmless_enemy := false
 static var player_weapon_names: Array = []  # empty = the blueprint's weapons
+## HUD calibration sandbox (touch; Options window CALIBRATE HUD -> title.gd `open_hud_calibration`, or CLI
+## `--calibrate-hud`): this scene builds a fixed, harmless sandbox instead of the scenario — the player ship
+## CALIB_PLAYER_SHIP (data/test_ships.xml: every system the fed_cruiser layout can hold at 2–4 bars, 6 crew), four ion
+## weapons (CALIB_WEAPONS: no hull damage) and three drones that never hurt the enemy (CALIB_DRONES), against a
+## harmless CALIB_ENEMY_SHIP (no weapons / drones, never escapes or surrenders) with CALIB_ENEMY_SHIELDS layers and
+## CALIB_ENEMY_HULL hull — kept paused, with the HudCalibrationPanel on top (scripts/ui/hud_calibration_panel.gd).
+## The run / profile are never saved from here (no run). Read and cleared by _ready (`calibrating`).
+static var calibrate_hud := false
+static var _calib_cli_done := false
+const CALIB_PLAYER_SHIP := "TEST_SHIP_CALIBRATE"
+const CALIB_ENEMY_SHIP := "REBEL_FAT"
+const CALIB_WEAPONS := ["ION_1", "ION_2", "ION_STUN", "ION_4"]
+const CALIB_DRONES := ["DEFENSE_1", "ANTI_DRONE", "REPAIR"]
+const CALIB_ENEMY_SHIELDS := 3
+const CALIB_ENEMY_HULL := 40
+var calibrating := false  # this scene is the HUD calibration sandbox
+var calib_panel: Control  # HudCalibrationPanel (calibrating only)
+var hud_calibration_live: Variant = null  # calibrating: the panel's live {group: scale} (applied, not saved)
 static var _scenario_cli_done := false  # scenario flags are read once; menu changes win afterwards
 
 # ------------------------------------------------------------------ game loop (run mode, `--run`)
@@ -139,9 +157,19 @@ func _ready() -> void:
 	if not _run_cli_done:
 		_run_cli_done = true
 		_parse_run_cli()
+	if not _calib_cli_done:
+		_calib_cli_done = true
+		calibrate_hud = calibrate_hud or OS.get_cmdline_user_args().has("--calibrate-hud")
+	calibrating = calibrate_hud
+	calibrate_hud = false
+	if calibrating:
+		run_mode = false  # a sandbox: no run is touched (nor saved)
+		input_mode = InputProfile.TOUCH  # the calibration is for the touch layouts
 	if run_mode:
 		_ensure_run()
 	_build()
+	if calibrating:
+		_build_calibration()
 	if run_mode and _cli_done_once:
 		_apply_view()
 		return
@@ -462,19 +490,25 @@ func _build() -> void:
 		# Continued run: projectiles in flight, drones in space, volleys, teleports ... (BattleSave, once).
 		BattleSave.apply(combat, SaveGame.take_battle(run), run.ship, es if has_enemy else null)
 	else:
-		player_space.setup(ShipState.new(player_ship_name, true))
-		enemy_space.setup(ShipState.new(enemy_ship_name, false))
-		if harmless_enemy:
+		# (HUD calibration: its own fixed loadout, whatever the scenario statics say; see `calibrate_hud`.)
+		player_space.setup(ShipState.new(CALIB_PLAYER_SHIP if calibrating else player_ship_name, true))
+		enemy_space.setup(ShipState.new(CALIB_ENEMY_SHIP if calibrating else enemy_ship_name, false))
+		if harmless_enemy or calibrating:
 			_strip_armament(enemy_space.ship)
-		if not player_weapon_names.is_empty():
-			_replace_weapons(player_space.ship, player_weapon_names)
+		if calibrating:
+			enemy_space.ship.max_hull = maxi(enemy_space.ship.max_hull, CALIB_ENEMY_HULL)
+			enemy_space.ship.hull = enemy_space.ship.max_hull
+		var pw: Array = CALIB_WEAPONS if calibrating else player_weapon_names
+		if not pw.is_empty():
+			_replace_weapons(player_space.ship, pw)
 		combat.add_space(player_space, enemy_space)
 		combat.add_space(enemy_space, player_space)
-		if harmless_enemy:
+		if harmless_enemy or calibrating:
 			_calm_ai(combat.ais[enemy_space])
-		if not player_drone_names.is_empty():
-			_replace_drones(player_space.ship, player_drone_names)
-		if not enemy_drone_names.is_empty():
+		var pd: Array = CALIB_DRONES if calibrating else player_drone_names
+		if not pd.is_empty():
+			_replace_drones(player_space.ship, pd)
+		if not enemy_drone_names.is_empty() and not calibrating:
 			_replace_drones(enemy_space.ship, enemy_drone_names)
 
 	enemy_window_back.setup(enemy_space.ship, player_space.ship, false)
@@ -579,7 +613,9 @@ func _build() -> void:
 		if not get_viewport().size_changed.is_connected(_touch_center_band):
 			get_viewport().size_changed.connect(_touch_center_band)
 		_touch_center_band()
-	if run == null:
+	if calibrating:
+		enemy_space.ship.set_shield_layers_max(CALIB_ENEMY_SHIELDS)  # (the sandbox's static setting is left alone)
+	elif run == null:
 		_set_enemy_shields(enemy_shield_layers)  # sandbox test setting (run mode: the blueprint's shields)
 	else:
 		btn_enemy_shields.text = "Enemy shields: ship"
@@ -702,6 +738,7 @@ func _build_debug() -> void:
 	vanilla_options = VanillaOptionsView.new()
 	vanilla_options.visible = false
 	vanilla_options.mod_options.connect(open_options)
+	vanilla_options.in_run = true  # "Calibrate HUD..." only from the main menu (it leaves this scene)
 	debug_layer.add_child(vanilla_options)
 	options = OptionsScreen.new()
 	options.visible = false
@@ -1186,6 +1223,8 @@ func _boxes_dragging() -> bool:
 ## Mouse and keys, before the GUI (CommandGui::LButtonDown/LButtonUp/RButtonDown/MouseMove/KeyDown;
 ## rules/crew_controls.md, rules/weapon_controls.md). The top bar and its menus are prototype-only.
 func _input(event: InputEvent) -> void:
+	if calib_panel != null and calib_panel.visible and calib_panel.captures(event):
+		return  # the HUD calibration panel (GUI, above the HUD) takes its own pointer events
 	if options != null and options.visible:
 		return  # the Options screen (GUI) takes everything; it closes itself on Esc / F10
 	if (pause_menu != null and pause_menu.visible) or (vanilla_options != null and vanilla_options.visible):
@@ -1882,6 +1921,8 @@ func _process(delta: float) -> void:
 	if run != null and not _run_process(delta):
 		return
 	_check_end()
+	if calibrating:
+		combat.paused = true  # the calibration sandbox never runs
 	_touch_layout_tick()
 	_touch_selection_tick()  # touch: selection mode auto-pause, PAUSE / CANCEL buttons
 	_update_combat_hooks()
@@ -2289,10 +2330,60 @@ func _hud_scale() -> float:
 func _touch_hud_refresh() -> void:
 	var s := _hud_scale()
 	var given := _hud_scale_set()
+	var cal := _hud_calibration()  # per group: the calibrated scale wins over the defaults
 	TOUCH_WEAPON_SCALES = [s] if given else [1.5, 1.25, 1.0]
-	TOUCH_SYSBAR_SCALE = s
-	TOUCH_TOPLEFT_SCALE = s
+	TOUCH_SYSBAR_SCALE = float(cal.get("bottom", s))
+	TOUCH_TOPLEFT_SCALE = float(cal.get("top", s))
 	TOUCH_SPLIT_PANEL_SCALES = [s] if given else [1.25, 1.0]
+	if cal.has("weapons"):
+		TOUCH_WEAPON_SCALES = [float(cal.weapons)]
+		TOUCH_SPLIT_PANEL_SCALES = [float(cal.weapons)]
+
+
+## HUD calibration (GameOptions.hud_calibration, set in the calibration sandbox): the touch HUD's group scales
+## {"top", "bottom", "weapons"} for this canvas's form factor (GameOptions.hud_form_factor: phone / fold_cover /
+## fold_inner), each absent = automatic. Precedence: `--hud-scale=` (or a test's hud_scale_override) > the
+## calibration (while calibrating: the panel's live values) > the automatic defaults. PC: none.
+func _hud_calibration() -> Dictionary:
+	if input_mode != InputProfile.TOUCH or _cli_hud_scale_set() or not is_inside_tree():
+		return {}
+	if calibrating and hud_calibration_live is Dictionary:
+		return hud_calibration_live
+	return GameOptions.hud_scales(hud_form_factor())
+
+
+## The HUD calibration form factor of the current canvas (GameOptions.hud_form_factor).
+func hud_form_factor() -> String:
+	return GameOptions.hud_form_factor(get_viewport().get_visible_rect().size)
+
+
+## The touch HUD group scales of the last layout (what the calibration sliders show for automatic groups).
+func touch_group_scales() -> Dictionary:
+	return {"top": TOUCH_TOPLEFT_SCALE, "bottom": TOUCH_SYSBAR_SCALE, "weapons": touch_weapon_scale}
+
+
+## Re-lays the touch HUD out now (calibration slider moved).
+func relayout_touch_hud() -> void:
+	if input_mode == InputProfile.TOUCH and not single_view and _touch_sig != "":
+		_touch_layout()
+
+
+## The HUD calibration panel on its own layer above the HUD (calibrating only).
+func _build_calibration() -> void:
+	var layer := CanvasLayer.new()
+	layer.layer = 20
+	add_child(layer)
+	calib_panel = preload("res://scripts/ui/hud_calibration_panel.gd").new()
+	layer.add_child(calib_panel)
+	calib_panel.setup(self)
+	calib_panel.finished.connect(_close_calibration)
+
+
+## Calibration closed (SAVE / BACK): back to the title with the options window open.
+func _close_calibration(_saved: bool) -> void:
+	hud_calibration_live = null
+	load("res://scripts/title.gd").open_options_next = true
+	FrameHost.change_scene(get_tree(), "res://title.tscn")
 
 ## Evade / O2 box (solid art x 8..97, y 96..137 at EVADE_BOX) moved under the scrap box, in the hull bar + scrap
 ## block: centred on the scrap box's solid art (x 383..504, centre 443.5) -> solid x 399..488, solid top 2 px under
@@ -2401,7 +2492,7 @@ func _touch_signature() -> String:
 	return "%s|%s|%d|%s|%d|%d|%s|%s|%s|%.3f|%s" % [get_viewport().get_visible_rect().size, _touch_enemy_present(),
 		crew_control.roster.size(), SystemsBar.layout_signature(sh), lv, sh.reactor_max,
 		drone_panel != null and is_instance_valid(drone_panel), weapon_panel.visible, fold_layout(), _hud_scale(),
-		phone_layout()]
+		phone_layout()] + "|" + str(_hud_calibration())
 
 
 ## An enemy ship is at the beacon and its TARGET window is up: not destroyed (victory), not jumped away
@@ -2599,7 +2690,7 @@ func _touch_layout() -> void:
 			# Height: the stack at c, then TOUCH_DRONE_GAP·c and the subsystems at TOUCH_SYSBAR_SCALE (fixed).
 			var hfit := floorf((h - top - sub_h) / maxf(stack_h + (TOUCH_DRONE_GAP if sub_h > 0 else 0.0), 1.0)
 				/ TOUCH_ENEMY_STEP + 0.01) * TOUCH_ENEMY_STEP
-			var c2 := maxf(1.0, minf(c, hfit))
+			var c2 := maxf(minf(1.0, c), minf(c, hfit))  # (a calibrated scale under 1 is kept)
 			var blocks: Array[Rect2] = []
 			for e in stack:
 				var at := Vector2(col_right - e[0].v_size.x * c2, top + e[1] * c2)
@@ -2721,8 +2812,8 @@ func _touch_apply(xf: Transform2D, stack: Array, cs: float, panel_at: Array, sub
 			touch_power.held_fn = func() -> bool: return _gestures().held_minus()  # held finger = − for now
 			hud_root.add_child(touch_power)
 			hud_root.move_child(touch_power, crew_list.get_index() + 1)
-		touch_power.scale = Vector2(TOUCH_TOPLEFT_SCALE, TOUCH_TOPLEFT_SCALE)
-		touch_power.position = (cb + Vector2(0, TouchPowerToggle.BELOW * TOUCH_TOPLEFT_SCALE)).round() \
+		touch_power.scale = Vector2(TOUCH_SYSBAR_SCALE, TOUCH_SYSBAR_SCALE)  # (the "bottom" group)
+		touch_power.position = (cb + Vector2(0, TouchPowerToggle.BELOW * TOUCH_SYSBAR_SCALE)).round() \
 			if st.is_empty() else _touch_toggle_at(sub_at, sub_b)
 	if touch_power != null:
 		touch_power.visible = sub_h > 0
@@ -3258,8 +3349,9 @@ const TOUCH_SPLIT_FROZEN := {
 
 
 func _touch_split_frozen() -> bool:
-	if not _touch_split() or absf(TOUCH_SYSBAR_SCALE - 1.5) > 0.01:
-		return false
+	if not _touch_split() or absf(TOUCH_SYSBAR_SCALE - 1.5) > 0.01 or absf(TOUCH_TOPLEFT_SCALE - 1.5) > 0.01 \
+			or TOUCH_SPLIT_PANEL_SCALES.size() != 1 or absf(float(TOUCH_SPLIT_PANEL_SCALES[0]) - 1.5) > 0.01:
+		return false  # (HUD calibration: other group scales are fitted)
 	var vis := get_viewport().get_visible_rect().size
 	return absf(vis.x - 1280.0) < 1.0 and absf(vis.y - 1099.0) <= 8.0
 
@@ -4508,7 +4600,15 @@ func _touch_layout_pan() -> void:
 	var h := vis.y
 	var g := PAN_HUD_GAP
 	var hs := _hud_scale_set()
-	var k := _hud_scale() if hs else vis.x / HudLayout.FRAME.x
+	var k0 := _hud_scale() if hs else vis.x / HudLayout.FRAME.x
+	# Group scales (HUD calibration, _hud_calibration; else all k0): k = top-left block, top buttons, PAUSE / CANCEL,
+	# pause text, pan arrows; kbar = systems bar, subsystems, + / − toggle; kw = weapons / drones boxes.
+	var cal := _hud_calibration()
+	var k := float(cal.get("top", k0))
+	var kbar := float(cal.get("bottom", k0))
+	var kw := float(cal.get("weapons", k0))
+	TOUCH_TOPLEFT_SCALE = k
+	TOUCH_SYSBAR_SCALE = kbar
 	var enemy := _touch_enemy_present()
 	# Top-left block, top buttons.
 	for c: Control in [ship_status, crew_list, command_hud]:
@@ -4529,15 +4629,15 @@ func _touch_layout_pan() -> void:
 	var hz := _pan_hazard(menu_r, vis.x, k)
 	if hz.has_area():
 		tops.append(hz)
-	# Systems bar bottom-left at k.
+	# Systems bar bottom-left at kbar.
 	systems_bar.pivot_offset = Vector2.ZERO
-	systems_bar.scale = Vector2(k, k)
-	systems_bar.position = Vector2(0, h - HudLayout.FRAME.y * k)
+	systems_bar.scale = Vector2(kbar, kbar)
+	systems_bar.position = Vector2(0, h - HudLayout.FRAME.y * kbar)
 	var bar_pos := systems_bar.position
 	# Subsystems + toggle, top right: the split layout's rule (round 4) — ks = HUD scale × TOUCH_SPLIT_SUB_RATIO (≥ 1),
 	# as high as their solid pieces stay TOUCH_SPLIT_SUB_TOP_GAP clear of the top buttons / hazard (the pilot's
 	# manning icon just under the wrench row).
-	var ks := maxf(1.0, k * TOUCH_SPLIT_SUB_RATIO)
+	var ks := maxf(1.0, kbar * TOUCH_SPLIT_SUB_RATIO)
 	var sub_rects: Array[Rect2] = []
 	var sa := Vector2.ZERO
 	var toggle_at := Vector2.INF
@@ -4564,11 +4664,11 @@ func _touch_layout_pan() -> void:
 		sa = Vector2(x0, y).round()
 		for p in pieces:
 			sub_rects.append(Rect2(sa + p.position, p.size))
-		systems_bar.sub_group.scale = Vector2(ks / k, ks / k)
-		systems_bar.sub_group.position = (sa - bar_pos) / k - sub_b.position * (ks / k)
+		systems_bar.sub_group.scale = Vector2(ks / kbar, ks / kbar)
+		systems_bar.sub_group.position = (sa - bar_pos) / kbar - sub_b.position * (ks / kbar)
 		toggle_at = (sa + tog.position - Vector2(6, 6) * ks).round()
-	# Bottom row: systems bar bottom-left (k); its solid pieces (frame coordinates -> canvas) for what sits above it.
-	var bar_xf := func(r: Rect2) -> Rect2: return Rect2(bar_pos + r.position * k, r.size * k)
+	# Bottom row: systems bar bottom-left (kbar); its solid pieces (frame coordinates -> canvas) for what sits above it.
+	var bar_xf := func(r: Rect2) -> Rect2: return Rect2(bar_pos + r.position * kbar, r.size * kbar)
 	var bar_right := 90.0
 	var bar_pieces: Array[Rect2] = []
 	var me := player_space.ship
@@ -4587,7 +4687,7 @@ func _touch_layout_pan() -> void:
 	var rc := systems_bar.reactor.counts().x if systems_bar.reactor else me.reactor_max
 	var rtop := ReactorColumn.top_y(rc) - 4.0
 	bar_pieces.append(bar_xf.call(Rect2(0, rtop, 90, HudLayout.FRAME.y - rtop)))
-	bar_right *= k
+	bar_right *= kbar
 	# PAUSE + CANCEL STACKED (TouchCombatButtons.stacked, set by _touch_selection_tick for a rect taller than one base):
 	# PAUSE at the bottom, CANCEL in the slot above it, same x.
 	var pair := Vector2(TouchCombatButtons.BASE_SIZE.x, TouchCombatButtons.BASE_SIZE.y * 2 + TouchCombatButtons.GAP) * k
@@ -4604,24 +4704,24 @@ func _touch_layout_pan() -> void:
 	var col_off := Vector2(-HudLayout.HOLDER_X, HudLayout.SYSTEM_BOX_Y - HudLayout.ARMAMENT_Y - SystemPowerColumn.ABOVE)
 	if wp != null:
 		var u := _pan_unit(wp)
-		var x := minf(bar_right + g - u.position.x * k, vis.x - g - u.end.x * k)
+		var x := minf(bar_right + g - u.position.x * kw, vis.x - g - u.end.x * kw)
 		# Glued to the canvas bottom: its lowest piece (holder, AUTOFIRE, power column) PAN_HUD_GAP above it (the PC
 		# frame's own bottom margin would only push the drones / TARGET window up).
 		var low := u.end.y
 		var af: Control = (wp as WeaponPanel).autofire_btn
 		if af != null:
 			low = maxf(low, af.position.y + af.size.y)
-		var at := Vector2(x, h - g - low * k).round()
+		var at := Vector2(x, h - g - low * kw).round()
 		wp.pivot_offset = Vector2.ZERO
-		wp.scale = Vector2(k, k)
+		wp.scale = Vector2(kw, kw)
 		wp.position = at
-		var holder := Rect2(at, wp.size * k)
+		var holder := Rect2(at, wp.size * kw)
 		box_rects.append(holder)
 		var col: SystemPowerColumn = (wp as WeaponPanel).column
 		if col != null:
 			var hr := col.hit_rect()
-			box_rects.append(Rect2(at + (col_off + hr.position) * k, hr.size * k))
-		w_right = at.x + u.end.x * k
+			box_rects.append(Rect2(at + (col_off + hr.position) * kw, hr.size * kw))
+		w_right = at.x + u.end.x * kw
 		w_top = holder.position.y
 	# Crew stations pair, bottom-right corner: side by side right of the weapons if there is room, else stacked.
 	var st: Array[Rect2] = []
@@ -4636,26 +4736,26 @@ func _touch_layout_pan() -> void:
 		var u := _pan_unit(dp)
 		# Glued on the weapons holder's solid top (PAN_GLUE apart; its rect starts PAN_HOLDER_GLOW higher), still clear
 		# of the weapons' power column and the stations.
-		var bottom := w_top + (PAN_HOLDER_GLOW * k if wp != null else 0.0) - PAN_GLUE  # the drones unit's bottom
-		var at := Vector2(vis.x - g - u.end.x * k, 0)
-		var dr := Rect2(at + u.position * k, u.size * k)
+		var bottom := w_top + (PAN_HOLDER_GLOW * kw if wp != null else 0.0) - PAN_GLUE  # the drones unit's bottom
+		var at := Vector2(vis.x - g - u.end.x * kw, 0)
+		var dr := Rect2(at + u.position * kw, u.size * kw)
 		for r in box_rects + st:
-			if r.position.x < at.x + u.end.x * k + PAN_GLUE and r.end.x + PAN_GLUE > dr.position.x 					and r.position.y < w_top - 0.5:  # pieces reaching above the weapons holder's top
+			if r.position.x < at.x + u.end.x * kw + PAN_GLUE and r.end.x + PAN_GLUE > dr.position.x 					and r.position.y < w_top - 0.5:  # pieces reaching above the weapons holder's top
 				bottom = minf(bottom, r.position.y - PAN_GLUE)
-		at.y = roundf(bottom - u.end.y * k)
+		at.y = roundf(bottom - u.end.y * kw)
 		at = at.round()
 		dp.pivot_offset = Vector2.ZERO
-		dp.scale = Vector2(k, k)
+		dp.scale = Vector2(kw, kw)
 		dp.position = at
-		box_rects.append(Rect2(at, dp.size * k))  # holder and power column apart (the TARGET window fits tighter)
+		box_rects.append(Rect2(at, dp.size * kw))  # holder and power column apart (the TARGET window fits tighter)
 		var dcol: SystemPowerColumn = systems_bar.columns.get("drones")
 		if dcol != null:
 			var hr := dcol.hit_rect()
-			box_rects.append(Rect2(at + (col_off + hr.position) * k, hr.size * k))
+			box_rects.append(Rect2(at + (col_off + hr.position) * kw, hr.size * kw))
 		var col: Control = systems_bar.columns.get("drones")
 		if col != null:  # the bar's drones power column, left of its box (same place as in the panel's frame)
-			col.scale = Vector2.ONE
-			col.position = (at + col_off * k - bar_pos) / k
+			col.scale = Vector2(kw / kbar, kw / kbar)
+			col.position = (at + col_off * kw - bar_pos) / kbar
 	# The free right strip (right of the TARGET window at pan 1, left of the right pan arrow): PAUSE + CANCEL
 	# (stacked) right-aligned in it, glued on the drones holder's solid top (else the weapons holder's; else the canvas
 	# bottom), and the pause overlay text (TARGETING / ROOM SELECTION ... + instruction, PAUSED) centred above them,
@@ -4671,7 +4771,7 @@ func _touch_layout_pan() -> void:
 	var strip_l := strip_r - strip_w
 	var glue_top := h
 	var holder: Rect2 = box_rects[2] if dp != null and box_rects.size() > 2 else (box_rects[0] if wp != null 		else Rect2(0, h, vis.x, 0))
-	glue_top = holder.position.y + (PAN_HOLDER_GLOW * k if holder.size.y > 0 else -g) - PAN_GLUE
+	glue_top = holder.position.y + (PAN_HOLDER_GLOW * kw if holder.size.y > 0 else -g) - PAN_GLUE
 	_touch_pause_at = Rect2(Vector2(strip_r - pair.x, roundf(glue_top - pair.y)), pair.round())
 	# Pause overlay text: frame block y 526 .. 592 (Text_pause1 / title from PAUSE_TEXT − 32, hint at PAUSE_HINT)
 	# mapped so its bottom is PAN_HUD_GAP above the pair and its centre on the strip's centre.
@@ -4681,8 +4781,8 @@ func _touch_layout_pan() -> void:
 	pause_overlay.position = (text_at - tb_bottom * kt).round()
 	var text_rect := Rect2(strip_l, text_at.y - (tb_bottom.y - HudLayout.PAUSE_TEXT.y + 32) * kt, strip_w,
 		(tb_bottom.y - HudLayout.PAUSE_TEXT.y + 32) * kt)
-	touch_weapon_scale = k
-	var kb := k
+	touch_weapon_scale = kw
+	var kb := kw
 	var local_st := []
 	for r in st:
 		local_st.append(Rect2((r.position - crew_list.position) / k, r.size / k))
@@ -4738,7 +4838,8 @@ func _touch_layout_pan() -> void:
 	# ship is fitted to its own hull at pan 0 like the phone pan layout: _touch_fit_ship against every fixed HUD
 	# piece (rooms clear of them, hull art may pass under), the largest TOUCH_SHIP_SCALES step with the whole hull
 	# on the canvas, or ONE step more with hull rows past the canvas top / bottom; capped by the list (×2.5).
-	var band_h := h - ((k - 1.0) * (PAN_PC_TOP_H + PAN_PC_BOTTOM_H) if hs else 0.0)
+	var band_h := h - ((k - 1.0) * PAN_PC_TOP_H + (maxf(kbar, kw) - 1.0) * PAN_PC_BOTTOM_H if hs or not cal.is_empty()
+		else 0.0)
 	var z_band := TOUCH_SHIP_SCALES[TOUCH_SHIP_SCALES.size() - 1] as float
 	for c: float in TOUCH_SHIP_SCALES:
 		if c <= band_h / HudLayout.FRAME.y + 0.001:
@@ -4924,7 +5025,11 @@ func _touch_layout_phone_pan() -> void:
 	var vis := get_viewport().get_visible_rect().size
 	var h := _touch_height()
 	var g := PAN_HUD_GAP
-	var k := TOUCH_TOPLEFT_SCALE
+	var k := TOUCH_TOPLEFT_SCALE  # top-left block, top buttons, PAUSE / CANCEL, pause text, pan arrows
+	var kbar := TOUCH_SYSBAR_SCALE  # systems bar, subsystems, + / − toggle (HUD calibration: may differ from k)
+	# Weapons / drones boxes: the calibrated scale exactly, else the largest step ≤ the HUD scale that fits one row.
+	var cal := _hud_calibration()
+	var kw_max := float(cal.get("weapons", _hud_scale()))
 	var enemy := _touch_enemy_present()
 	var me := player_space.ship
 	# Top-left block + crew list (phone arrangement), top buttons at the frame origin.
@@ -4948,12 +5053,12 @@ func _touch_layout_phone_pan() -> void:
 	var hz := _pan_hazard(menu_r, vis.x, k)
 	if hz.has_area():
 		tops.append(hz)
-	# Systems bar bottom-left ×k; its solid pieces (frame -> canvas).
+	# Systems bar bottom-left ×kbar; its solid pieces (frame -> canvas).
 	systems_bar.pivot_offset = Vector2.ZERO
-	systems_bar.scale = Vector2(k, k)
-	systems_bar.position = Vector2(0, h - HudLayout.FRAME.y * k)
+	systems_bar.scale = Vector2(kbar, kbar)
+	systems_bar.position = Vector2(0, h - HudLayout.FRAME.y * kbar)
 	var bar_pos := systems_bar.position
-	var bar_xf := func(r: Rect2) -> Rect2: return Rect2(bar_pos + r.position * k, r.size * k)
+	var bar_xf := func(r: Rect2) -> Rect2: return Rect2(bar_pos + r.position * kbar, r.size * kbar)
 	var bar_right := 90.0
 	var bar_pieces: Array[Rect2] = []
 	for id in systems_bar.main_ids:
@@ -4972,9 +5077,9 @@ func _touch_layout_phone_pan() -> void:
 	var rtop := ReactorColumn.top_y(rc) - 4.0
 	bar_pieces.append(bar_xf.call(Rect2(0, rtop, 90, HudLayout.FRAME.y - rtop)))
 	bar_pieces.append(bar_xf.call(Rect2(0, HudLayout.FRAME.y - 30, bar_right, 30)))  # bottom wire line
-	var bar_r := bar_pos.x + bar_right * k
+	var bar_r := bar_pos.x + bar_right * kbar
 	# Subsystems + toggle, top right (the pan rule).
-	var ks := maxf(1.0, k * TOUCH_SPLIT_SUB_RATIO)
+	var ks := maxf(1.0, kbar * TOUCH_SPLIT_SUB_RATIO)
 	var sub_rects: Array[Rect2] = []
 	var sa := Vector2.ZERO
 	var toggle_at := Vector2.INF
@@ -4999,8 +5104,8 @@ func _touch_layout_phone_pan() -> void:
 		sa = Vector2(x0, y).round()
 		for p in pieces:
 			sub_rects.append(Rect2(sa + p.position, p.size))
-		systems_bar.sub_group.scale = Vector2(ks / k, ks / k)
-		systems_bar.sub_group.position = (sa - bar_pos) / k - sub_b.position * (ks / k)
+		systems_bar.sub_group.scale = Vector2(ks / kbar, ks / kbar)
+		systems_bar.sub_group.position = (sa - bar_pos) / kbar - sub_b.position * (ks / kbar)
 		toggle_at = (sa + tog.position - Vector2(6, 6) * ks).round()
 	var sub_left := vis.x
 	var sub_bottom := 0.0
@@ -5021,12 +5126,12 @@ func _touch_layout_phone_pan() -> void:
 	var b := TOUCH_STATION_SIZE
 	var sg := TOUCH_STATION_GAP
 	var rg := PPAN_ROW_GAP
-	var kb := k
+	var kb := kw_max
 	var one_row := false
 	var st_side := true
-	var steps: Array = [k]
+	var steps: Array = [kw_max]
 	for c: float in TOUCH_SHIP_SCALES:
-		if c < k - 0.001 and c >= PPAN_BOX_MIN - 0.001:
+		if not cal.has("weapons") and c < kw_max - 0.001 and c >= PPAN_BOX_MIN - 0.001:
 			steps.append(c)
 	for c: float in steps:
 		var row_r := bar_r + (rg + wu.size.x * c if wp != null else 0.0) + (rg + du.size.x * c if dp != null else 0.0)
@@ -5086,8 +5191,8 @@ func _touch_layout_phone_pan() -> void:
 		if dcol != null:  # the bar's drones power column, left of its box (same place as in the panel's frame)
 			var hr: Rect2 = (dcol as SystemPowerColumn).hit_rect()
 			box_rects.append(Rect2(at + (col_off + hr.position) * kb, hr.size * kb))
-			dcol.scale = Vector2(kb / k, kb / k)
-			dcol.position = (at + col_off * kb - bar_pos) / k
+			dcol.scale = Vector2(kb / kbar, kb / kbar)
+			dcol.position = (at + col_off * kb - bar_pos) / kbar
 	box_rects.append_array(holders)
 	touch_weapon_scale = kb
 	var extra: Array[Rect2] = []
