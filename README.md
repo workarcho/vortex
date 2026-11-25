@@ -7,6 +7,8 @@ with a touch interface designed for phones and foldables, and a PC version that 
 > FTL code, images, sounds or text: on first launch it asks for the `ftl.dat` file from your installation and
 > reads the game data from it.
 
+**[See the showcase →](SHOWCASE.md)** (screenshots of the phone and Fold layouts, HUD calibration, mods and more)
+
 ## Why
 
 FTL's interface is drawn at a fixed 1280×720 and scaled as one image, which is tiny on a phone. This project
