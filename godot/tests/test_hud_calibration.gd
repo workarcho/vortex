@@ -137,28 +137,50 @@ func _sandbox() -> void:
 
 func _sliders() -> void:
 	print("\n== Sliders re-lay the HUD out live")
-	var sl: Dictionary = panel.sliders
-	(sl["top"] as HSlider).value = 1.5
+	_slide("top", 1.5)
 	near("top: ship status ×", main.ship_status.scale.x, 1.5)
 	near("top: crew list ×", main.crew_list.scale.x, 1.5)
 	near("top: top buttons ×", main.command_hud.scale.x, 1.5)
 	near("bottom unchanged", main.systems_bar.scale.x, 1.2)
-	(sl["bottom"] as HSlider).value = 0.9
+	_slide("bottom", 0.9)
 	near("bottom: systems bar ×", main.systems_bar.scale.x, 0.9)
 	near("bottom: power toggle ×", main.touch_power.scale.x, 0.9)
 	near("top unchanged", main.ship_status.scale.x, 1.5)
-	(sl["weapons"] as HSlider).value = 1.0
+	_slide("weapons", 1.0)
 	near("weapons: weapons column ×", main.weapon_panel.scale.x, 1.0)
 	near("weapons: drones column ×", main.drone_panel.scale.x, 1.0)
-	panel.nudge("weapons", 1)
+	panel.tap("plus:weapons")
 	near("+ button: one step", main.weapon_panel.scale.x, 1.05)
-	panel.nudge("weapons", -1)
-	(sl["top"] as HSlider).value = 3.0
+	panel.tap("minus:weapons")
+	near("− button: one step back", main.weapon_panel.scale.x, 1.0)
+	_slide("top", 3.0)
 	near("slider range max", float(panel.live.top), GameOptions.HUD_SCALE_MAX)
-	(sl["top"] as HSlider).value = 1.25
+	_slide("top", 0.1)
+	near("slider range min", float(panel.live.top), GameOptions.HUD_SCALE_MIN)
+	# A drag: press on the marker, move, release.
+	panel.press(panel.slider_point("top", 0.75))
+	panel.move(panel.slider_point("top", 1.25))
+	panel.release(panel.slider_point("top", 1.25))
 	check("live values", panel.live, {"top": 1.25, "bottom": 0.9, "weapons": 1.0})
-	check("value label", (panel.values["bottom"] as Label).text, "×0.90")
+	check("value text", panel.value_text("bottom"), "x0.90")
+	check("nothing hovered after release", panel.hover, "")
+	panel.tap("toggle")
+	check("HIDE collapses", panel.collapsed, true)
+	check("collapsed: only the toggle answers", panel.item_at(panel.slider_point("top", 1.0)), "")
+	panel.tap("toggle")
+	check("SHOW expands", panel.collapsed, false)
+	var held: Vector2 = (panel.items["plus:top"] as Rect2).get_center()
+	panel.press(held)
+	panel.release(held + Vector2(0, 200))
+	near("released off the button: nothing", float(panel.live.top), 1.25)
 	check("nothing saved yet", GameOptions.hud_calibration, {})
+
+
+## A tap on `group`'s slider where its marker sits at `v` (the panel's own pointer path, local FTL px).
+func _slide(group: String, v: float) -> void:
+	var p: Vector2 = panel.slider_point(group, v)
+	panel.press(p)
+	panel.release(p)
 
 
 func _save_and_forms() -> void:
@@ -177,8 +199,8 @@ func _save_and_forms() -> void:
 	check("fold starts automatic", panel.live, {})
 	check("layout", main._touch_kind, "split")
 	near("fold auto ×1.5", main.TOUCH_TOPLEFT_SCALE, 1.5)
-	(panel.sliders["top"] as HSlider).value = 1.2
-	(panel.sliders["weapons"] as HSlider).value = 1.25
+	_slide("top", 1.2)
+	_slide("weapons", 1.25)
 	near("fold top ×", main.ship_status.scale.x, 1.2)
 	near("fold weapons box ×", main.weapon_panel.scale.x, 1.25)
 	near("fold bottom stays auto", main.systems_bar.scale.x, 1.5)
@@ -207,7 +229,7 @@ func _reset() -> void:
 	check("removed in the file", GameOptions.hud_scales("phone"), {})
 	near("back to auto top", main.ship_status.scale.x, 1.2)
 	near("back to auto bottom", main.systems_bar.scale.x, 1.2)
-	check("labels say auto", (panel.values["top"] as Label).text.ends_with("auto"), true)
+	check("values say AUTO", panel.value_text("top").ends_with(" AUTO"), true)
 	panel.back()
 	check("BACK finishes (not saved)", finished_with, [true, true, false])
 

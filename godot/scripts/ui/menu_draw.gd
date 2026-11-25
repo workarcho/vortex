@@ -108,10 +108,7 @@ static var _panel_box: StyleBoxTexture
 ## panel + (8, −23)), and the patterned translucent panel (9-slice of the AUDIO panel of optionsUI_new.png,
 ## 8 px chamfered corners, tiled centre). Geometry measured on optionsUI_new.png / screenshot 36.
 static func options_frame(ci: CanvasItem, panel: Rect2, title: String) -> void:
-	var band := panel.grow_individual(4, 24, 4, 4)
-	for i in range(10, 0, -2):  # glow: #79f2fd, α 0.23 at the band edge fading to 0 over 10 px
-		ci.draw_colored_polygon(_chamfer(band.grow(i), 8.0 + i * 0.6), Color8(121, 242, 253, int(6 + (10 - i) * 3)))
-	ci.draw_colored_polygon(_chamfer(band, 8.0), COL_ON)
+	options_band(ci, panel.grow_individual(4, 24, 4, 4))
 	if _panel_box == null:
 		var t := FtlData.texture("img/optionsUI_new.png")
 		if t:
@@ -127,6 +124,14 @@ static func options_frame(ci: CanvasItem, panel: Rect2, title: String) -> void:
 		ci.draw_colored_polygon(_chamfer(panel, 6.0), Color8(133, 116, 116, 224))
 	if title != "":
 		FtlData.draw_ftl_text(ci, 62, title, panel.position + Vector2(8, -23), COL_TEXT)
+
+
+## The outer part of `options_frame` alone: the cyan glow and the chamfered COLOR_BUTTON_ON band `band` (also a
+## frame collapsed to its title strip).
+static func options_band(ci: CanvasItem, band: Rect2) -> void:
+	for i in range(10, 0, -2):  # glow: #79f2fd, α 0.23 at the band edge fading to 0 over 10 px
+		ci.draw_colored_polygon(_chamfer(band.grow(i), 8.0 + i * 0.6), Color8(121, 242, 253, int(6 + (10 - i) * 3)))
+	ci.draw_colored_polygon(_chamfer(band, 8.0), COL_ON)
 
 
 ## The ControlsScreen tab (`box_options_configure_tab.png`, 91×63): left 39 px at (123, 70), the 1 px column 39
