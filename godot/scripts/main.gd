@@ -2101,6 +2101,21 @@ func _cli_pointer(a: String) -> void:
 		func(c): return crew_control.roster.find(c)), crew_control.move_highlight().slice(1)])
 
 
+## --equip-drag: press on box `kind:n` of the ship screen's equipment tab and keep the drag going.
+func _debug_equip_drag(kind: String, n: int) -> void:
+	if ship_screen == null or ship_screen.equip_view == null:
+		print("equip drag: no ship screen")
+		return
+	var kinds := {"weapon": ShipInventory.WEAPON, "drone": ShipInventory.DRONE, "aug": ShipInventory.AUG,
+		"cargo": ShipInventory.CARGO, "over": ShipInventory.OVER, "over_aug": ShipInventory.OVER_AUG}
+	var ev := ship_screen.equip_view
+	var b := Vector2i(int(kinds.get(kind, ShipInventory.WEAPON)), n)
+	var c := ev.box_rect(b).get_center()
+	ev.press(c)
+	ev.motion(c + Vector2(20, 0))
+	print("equip drag %s:%d: dragging %s" % [kind, n, ev.dragging()])
+
+
 ## Test: cycle 0 → 1 → 2 → 3 → 4 shield layers on the enemy ship.
 func _cycle_enemy_shields() -> void:
 	_set_enemy_shields((enemy_shield_layers + 1) % 5)
@@ -3844,6 +3859,7 @@ func _player_crew_left() -> bool:
 #   Pointer simulation (rules/crew_controls.md; real mouse motion is then ignored), applied at 0.2 s:
 #   [--hover-crew=I] (pointer on crew-list entry I's sprite, 0-based)  [--hover-room=me|enemy:ROOM]
 #   [--pointer=X,Y] (screen, 1280×720 frame)  [--drag-box=X1,Y1,X2,Y2] (left press at 1, held at 2)
+#   [--equip-drag=weapon|drone|aug|cargo|over|over_aug:N] (ship screen equipment tab: hold a drag from box N)
 #   [--swap-weapons=A,B] (drag box A onto box B, 1-based)  [--save-stations] [--return-stations@S]
 
 var pending_hits: Array = []
@@ -4276,6 +4292,11 @@ func _handle_cli() -> void:
 			pointer_locked = true
 			var arg := a
 			scheduled.append([0.2, func(): _cli_pointer(arg)])
+		elif a.begins_with("--equip-drag="):
+			# --equip-drag=weapon|drone|aug|cargo|over|over_aug:N (0-based box): press on that equipment box of the
+			# open ship screen and hold the drag (screenshots of the drag highlights; pair with --pointer=X,Y).
+			var ep := a.trim_prefix("--equip-drag=").split(":")
+			scheduled.append([0.2, func(): _debug_equip_drag(ep[0], int(ep[1]) if ep.size() > 1 else 0)])
 		elif a.begins_with("--swap-weapons="):
 			var p := a.trim_prefix("--swap-weapons=").split(",")
 			weapon_control.swap(int(p[0]) - 1, int(p[1]) - 1)

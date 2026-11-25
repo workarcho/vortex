@@ -46,6 +46,83 @@ func _run() -> void:
 	_test_crew()
 	_test_box_labels()
 	_test_reactor_info()
+	_test_drag_highlights()
+
+
+## Equipment drag highlights (EquipmentBox::OnRender @0052b3d0, Equipment::OnLoop @00524fb0 / MouseMove @00525580):
+## box images untinted; while dragging, box_overlay_red.png (alpha 0.2) × overlayColor/255 at alpha 0.5 — COLOR_GREEN
+## on every unblocked box for a weapon / drone drag (filled slots and the source too), COLOR_RED on blocked boxes,
+## nothing on augment boxes; the source box draws empty; glow = hovered non-empty box (idle) / hovered unblocked box
+## (dragging).
+func _test_drag_highlights() -> void:
+	print("equipment drag highlights")
+	var r := make_run()
+	var ship := r.ship
+	ship.augments = ["SCRAP_COLLECTOR"]
+	r.give_item("drone", "COMBAT_1")  # no drone system: goes to cargo 0
+	var ev := EquipmentView.new()
+	var pc := InputProfile.new(InputProfile.PC)
+	pc.run = r
+	ev.setup(r, pc)
+	add_child(ev)
+	var W0 := Vector2i(ShipInventory.WEAPON, 0)
+	var W1 := Vector2i(ShipInventory.WEAPON, 1)
+	var W3 := Vector2i(ShipInventory.WEAPON, 3)
+	var A0 := Vector2i(ShipInventory.AUG, 0)
+	var A1 := Vector2i(ShipInventory.AUG, 1)
+	var C0 := Vector2i(ShipInventory.CARGO, 0)
+	var C1 := Vector2i(ShipInventory.CARGO, 1)
+	var none := ShipInventory.NONE
+	var clear := Color(1, 1, 1, 0)
+	var green := Color(EquipmentView.COL_GREEN, 0.5)
+	var red := Color(EquipmentView.COL_RED, 0.5)
+	check("overlay image / alpha", [EquipmentView.OVERLAY_IMG, EquipmentView.OVERLAY_ALPHA],
+		["upgradeUI/Equipment/box_overlay_red.png", 0.5])
+	var ov := FtlData.texture("img/" + EquipmentView.OVERLAY_IMG).get_image()
+	check("overlay art: white at alpha 51 (10 % wash after × 0.5)", ov.get_pixel(54, 38), Color8(255, 255, 255, 51))
+	check("weapon colours COLOR_GREEN / COLOR_RED", [EquipmentView.COL_GREEN, EquipmentView.COL_RED],
+		[Color8(100, 255, 100), Color8(255, 50, 50)])
+	# idle
+	check("idle: filled weapon, no overlay", ev.box_look(W0, none, false), {"img":
+		"upgradeUI/Equipment/box_weapons_on.png", "empty": false, "overlay": clear})
+	check("idle: hovered filled box glows", ev.box_look(W0, W0, false).img, "upgradeUI/Equipment/box_weapons_selected.png")
+	check("idle: hovered empty box does not glow", ev.box_look(W3, W3, false).img,
+		"upgradeUI/Equipment/box_weapons_off.png")
+	check("idle: empty cargo = base", ev.box_look(C1, none, false).img, "upgradeUI/Equipment/box_base_off.png")
+	# weapon drag from slot 0, pointer over slot 1
+	ev.press(ev.box_rect(W0).get_center())
+	check("mouse press drags", ev.dragging(), true)
+	check("weapon drag: source drawn empty, green, glows when hovered", ev.box_look(W0, W0, true), {"img":
+		"upgradeUI/Equipment/box_weapons_off_selected.png", "empty": true, "overlay": green})
+	check("weapon drag: other filled slot keeps its item art + green wash", ev.box_look(W1, none, true), {"img":
+		"upgradeUI/Equipment/box_weapons_on.png", "empty": false, "overlay": green})
+	check("weapon drag: hovered filled slot glows", ev.box_look(W1, W1, true).img,
+		"upgradeUI/Equipment/box_weapons_selected.png")
+	check("weapon drag: empty slot green", ev.box_look(W3, none, true).overlay, green)
+	check("weapon drag: empty cargo green", ev.box_look(C1, none, true), {"img":
+		"upgradeUI/Equipment/box_base_off.png", "empty": true, "overlay": green})
+	check("weapon drag: cargo holding a drone is blocked (red, no glow)", [ev.box_look(C0, C0, true).overlay,
+		ev.box_look(C0, C0, true).img], [red, "upgradeUI/Equipment/box_drones_on.png"])
+	check("weapon drag: augment boxes untouched (no overlay, no glow)", [ev.box_look(A0, A0, true),
+		ev.box_look(A1, none, true).overlay], [{"img": "upgradeUI/Equipment/box_augment_on.png", "empty": false,
+		"overlay": clear}, clear])
+	ev.release(Vector2(5, 5))
+	# augment drag: no green anywhere; weapon / cargo boxes blocked (red); augment boxes never tinted
+	ev.press(ev.box_rect(A0).get_center())
+	check("augment drag: weapon slot red", ev.box_look(W1, none, true).overlay, red)
+	check("augment drag: empty cargo red", ev.box_look(C1, none, true).overlay, red)
+	check("augment drag: empty augment slot glows, no overlay", ev.box_look(A1, A1, true), {"img":
+		"upgradeUI/Equipment/box_augment_off_selected.png", "empty": true, "overlay": clear})
+	check("augment drag: source slot (blocked in the exe) does not glow", ev.box_look(A0, A0, true).img,
+		"upgradeUI/Equipment/box_augment_off.png")
+	ev.release(Vector2(5, 5))
+	# drone drag from cargo (no drone system): cargo green (cargo ↔ cargo), weapon slots red
+	ev.press(ev.box_rect(C0).get_center())
+	check("cargo drone drag: other cargo green, weapon slot red, source base + green", [ev.box_look(C1, none,
+		true).overlay, ev.box_look(W0, none, true).overlay, ev.box_look(C0, none, true)], [green, red, {"img":
+		"upgradeUI/Equipment/box_base_off.png", "empty": true, "overlay": green}])
+	ev.release(Vector2(5, 5))
+	ev.queue_free()
 
 
 ## Upgrades::OnLoop, reactor hovered [exe]: InfoBox::SetText(upgrade_reactor, reactor_desc); below 5 bars (reactor +

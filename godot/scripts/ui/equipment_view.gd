@@ -17,6 +17,9 @@ const STORE_CLOSE := Rect2(468, 470, 103, 32)
 const STORE_CLOSE_BASE := Vector2(445, 463)
 const COL_GREEN := Color8(100, 255, 100)
 const COL_RED := Color8(255, 50, 50)
+## Drag overlay (EquipmentBox::OnRender): box_overlay_red.png drawn with overlayColor / 255, alpha 0.5.
+const OVERLAY_IMG := "upgradeUI/Equipment/box_overlay_red.png"
+const OVERLAY_ALPHA := 0.5
 ## Box labels (EquipmentBox::RenderLabels, see augment_label / item_label).
 const LABEL_COL := Color.WHITE  # COLOR_WHITE / 255, every state
 const AUG_LABEL_FONT := 13
@@ -325,9 +328,28 @@ func _draw() -> void:
 	else:
 		screen.draw_chrome(self, mouse if not profile.is_touch() else Vector2(-1, -1))
 	if drag:
-		var it := inv().item_at(run, _press)
-		var sz := AUG_BOX if it.kind == "augment" else ITEM_BOX
-		_draw_item(it, Rect2(mouse - _grab, sz), 0.85)
+		_draw_dragged(mouse, hover)
+
+
+## The dragged item at the pointer (Equipment::OnRender: translate currentMouse, then the source box's RenderIcon):
+## a weapon / drone is its bare icon (no box, no label, untinted) centred on the pointer; an augment
+## (AugmentEquipBox::RenderIcon = OnRender(false) + RenderLabels) is its whole box — `box_augment_on` (`_selected`
+## while that source box glows) + title — with its top-left at the pointer. Mouse: exactly at the cursor
+## (MouseClick keeps no grab offset). Touch [ours]: keeps the finger's grab point on the item.
+func _draw_dragged(mouse: Vector2, hover: Vector2i) -> void:
+	var it := inv().item_at(run, _press)
+	if it.is_empty():
+		return
+	var aug := String(it.kind) == "augment"
+	var at := mouse - _grab
+	if not profile.is_touch():
+		at = mouse - (Vector2.ZERO if aug else (WEAPON_ICON_AT if it.kind == "weapon" else DRONE_ICON_AT))
+	if aug:
+		var glow := hover == _press and drag_target_ok(_press, _press)
+		ShipScreen.img(self, "upgradeUI/Equipment/box_augment_%s.png" % ("selected" if glow else "on"), at)
+		augment_label(self, FtlData.blueprint_title(String(it.name), "augment"), at)
+		return
+	_draw_item(it, Rect2(at, ITEM_BOX), 1.0, false)
 
 
 func _box_type(b: Vector2i, it: Dictionary) -> String:
@@ -343,38 +365,72 @@ func _box_type(b: Vector2i, it: Dictionary) -> String:
 	return "weapons" if it.kind == "weapon" else "drones"
 
 
-func _draw_box(b: Vector2i, hover: Vector2i, drag: bool) -> void:
+## While dragging the item of `s`, is box `t` a target (Equipment::OnLoop @00524fb0: not blocked)? Other boxes:
+## `ShipInventory.accepts`. The source box still holds the item in the exe, so OnLoop tests it like any box: a
+## weapon / drone source passes its own CanHoldWeapon / CanHoldDrone (weapon slot, or a cargo box holding that
+## kind), a cargo source passes the cargo ↔ cargo rule, the over-capacity augment box passes (overAugBox == dragged
+## box, CanHoldAugment), and an augment slot fails (CanHoldAugment but not IsEmpty) — blocked, which for an
+## augment box only means no hover glow (its overlay is never drawn).
+func drag_target_ok(s: Vector2i, t: Vector2i) -> bool:
+	if s != t:
+		return inv().accepts(run, s, t)
+	var k := String(inv().item_at(run, s).get("kind", ""))
+	if (k == "weapon" and inv().can_hold_weapon(run, t)) or (k == "drone" and inv().can_hold_drone(run, t)):
+		return true
+	return ShipInventory.is_cargo(s) or s.x == ShipInventory.OVER_AUG
+
+
+## How one box renders (EquipmentBox::OnRender @0052b3d0 + Equipment::OnLoop @00524fb0 + MouseMove @00525580):
+## {img: box image path, empty: drawn as an empty box (no item / the drag source), overlay: Color (alpha 0 = none)}.
+## - The box image is always drawn untinted (its primitives are created with colour (1, 1, 1, 1)).
+## - Image: `off` / `off_selected` when empty or it is the drag source (GetType(forcedEmpty) → an emptied cargo box
+##   is `base`), else `on` / `selected`; `_selected` variants while bGlow. bGlow (MouseMove): not dragging → the
+##   hovered box if it holds an item; dragging → the hovered box unless blocked (the source box included).
+## - Overlay (only while dragging): `box_overlay_red.png` (white, alpha 51/255 = 0.2) drawn with overlayColor / 255
+##   at alpha 0.5 — an effective 10 % wash. overlayColor = COLOR_RED on blocked boxes; COLOR_GREEN on every other
+##   box when a weapon or drone is dragged (filled slots and the source too); white (= no overlay) for an augment /
+##   cargo-swap-only drag. Never on augment boxes (GetType 3): those keep their normal look in every drag.
+func box_look(b: Vector2i, hover: Vector2i, drag: bool) -> Dictionary:
 	var it := inv().item_at(run, b)
-	if drag and b == _press:
-		it = {}  # the item travels with the cursor
-	var r := item_rect(b)
-	var ty := _box_type(b, it)
-	var glow := b == hover or b == _selected
-	var col := Color.WHITE
-	var blocked := false
-	if drag and b != _press:
-		var ok := inv().accepts(run, _press, b)
-		blocked = not ok
+	var source := drag and b == _press
+	var empty := it.is_empty() or source  # the source's item travels with the cursor
+	var glow := false
+	var overlay := Color(1, 1, 1, 0)
+	if not drag:
+		glow = (b == hover and not it.is_empty()) or b == _selected  # _selected: touch tap selection [ours]
+	else:
+		var ok := drag_target_ok(_press, b)
 		glow = ok and b == hover
+		var col := Color.WHITE
 		var dk := String(inv().item_at(run, _press).get("kind", ""))
-		if blocked:
+		if not ok:
 			col = COL_RED
 		elif dk == "weapon" or dk == "drone":
 			col = COL_GREEN
-	var st := ("selected" if glow else "on") if not it.is_empty() else ("off_selected" if glow else "off")
+		if col != Color.WHITE and not ShipInventory.can_hold_augment(b):
+			overlay = Color(col, OVERLAY_ALPHA)
+	var ty := _box_type(b, {} if empty else it)
+	var st := ("off_selected" if glow else "off") if empty else ("selected" if glow else "on")
 	if ty == "base" and st == "on":
 		st = "off"
-	ShipScreen.img(self, "upgradeUI/Equipment/box_%s_%s.png" % [ty, st], r.position, col)
-	if not it.is_empty():
-		_draw_item(it, r, 1.0)
-	if blocked:
-		ShipScreen.img(self, "upgradeUI/Equipment/box_overlay_red.png", r.position)
+	return {"img": "upgradeUI/Equipment/box_%s_%s.png" % [ty, st], "empty": empty, "overlay": overlay}
+
+
+func _draw_box(b: Vector2i, hover: Vector2i, drag: bool) -> void:
+	var look := box_look(b, hover, drag)
+	var r := item_rect(b)
+	ShipScreen.img(self, look.img, r.position)
+	if not look.empty:
+		_draw_item(inv().item_at(run, b), r, 1.0)
+	var ov: Color = look.overlay
+	if ov.a > 0.0:
+		ShipScreen.img(self, OVERLAY_IMG, r.position, ov)
 
 
 ## Item art + label inside a box rect (EquipmentBox::OnRender / RenderIcon / RenderLabels [exe]): weapon art (charged
 ## frame, rotated + mirrored) centred at box + WEAPON_ICON_AT, drone icon (DroneBlueprint::RenderIcon) at box +
 ## DRONE_ICON_AT, augment title.
-func _draw_item(it: Dictionary, r: Rect2, alpha: float) -> void:
+func _draw_item(it: Dictionary, r: Rect2, alpha: float, label := true) -> void:
 	if it.is_empty():
 		return
 	var title := FtlData.blueprint_title(String(it.name), String(it.kind))
@@ -386,10 +442,12 @@ func _draw_item(it: Dictionary, r: Rect2, alpha: float) -> void:
 				var src: Rect2 = a.frames[clampi(int(a.get("charged", 0)), 0, a.frames.size() - 1)]
 				WeaponIcon.draw(self, a.texture, src, r.position + WEAPON_ICON_AT, white)  # rotate 90° + mirror
 			# EquipmentBox::RenderLabels: weapons and drones show the short title; no power pips here.
-			_label(StoreView.short_name({"kind": "weapon", "name": it.name}), r, alpha)
+			if label:
+				_label(StoreView.short_name({"kind": "weapon", "name": it.name}), r, alpha)
 		"drone":
 			WeaponIcon.draw_drone(self, String(it.name), r.position + DRONE_ICON_AT, white)
-			_label(FtlData.blueprint_short(String(it.name), "drone"), r, alpha)
+			if label:
+				_label(FtlData.blueprint_short(String(it.name), "drone"), r, alpha)
 		"augment":
 			augment_label(self, title, r.position, alpha)
 
